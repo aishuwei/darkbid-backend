@@ -1,0 +1,6 @@
+python-docx
+pandas
+openpyxl
+# 后续添加:
+# paddleocr
+# onnxruntime

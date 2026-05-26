@@ -1,0 +1,75 @@
+{
+  "document_info": {
+    "name": "吉林双盲评审暗标",
+    "description": "投标文件技术部分暗标排版规则",
+    "paper_size": "A4",
+    "max_pages": 200
+  },
+  "page_check": {
+    "enabled": true,
+    "paper_size": "A4",
+    "max_pages": 200
+  },
+  "margin_check": {
+    "enabled": true,
+    "description": "上边距2.5厘米，其余2厘米",
+    "top_cm": 2.5,
+    "bottom_cm": 2.0,
+    "left_cm": 2.0,
+    "right_cm": 2.0,
+    "tolerance_cm": 0.1
+  },
+  "font_check": {
+    "enabled": true,
+    "description": "标题及正文均为宋体四号常规字，黑色；表内文字同正文要求",
+    "chinese_font": "宋体",
+    "size_pt": 14,
+    "color_hex": "000000",
+    "allow_bold": false,
+    "allow_italic": false,
+    "allow_underline": false,
+    "allow_color_change": false,
+    "check_table_text": true
+  },
+  "paragraph_check": {
+    "enabled": true,
+    "description": "首行缩进2字符，行距固定值30磅，左对齐，无段前后间距，不得空格代替缩进，字符间不得有空格，不得有空段落，不得用左右缩进增加间距",
+    "alignment": "left",
+    "line_spacing_rule": "exact",
+    "line_spacing_pt": 30,
+    "line_spacing_tolerance_pt": 0.5,
+    "first_line_indent_chars": 2,
+    "first_line_indent_tolerance_chars": 0.3,
+    "space_before_pt": 0,
+    "space_after_pt": 0,
+    "space_tolerance_pt": 0.5,
+    "allow_space_as_indent": false,
+    "no_space_between_chars": true,
+    "no_empty_paragraphs": true,
+    "allow_left_indent": false,
+    "allow_right_indent": false
+  },
+  "structure_check": {
+    "enabled": true,
+    "description": "不做封面和目录，不设页眉页脚页码",
+    "allow_toc": false,
+    "allow_header": false,
+    "allow_footer": false,
+    "allow_page_number": false
+  },
+  "object_check": {
+    "enabled": true,
+    "description": "图表整体居中，表内文字左对齐无缩进无固定行距，但字体样式同正文",
+    "table_alignment": "center",
+    "table_text_alignment": "left",
+    "table_indent_none": true,
+    "table_spacing_none": true,
+    "image_alignment": "center"
+  },
+  "punctuation_check": {
+    "enabled": true,
+    "description": "符号全部使用中文标点，字符间不得出现空格",
+    "require_chinese": true,
+    "no_space_between_chars": true
+  }
+}

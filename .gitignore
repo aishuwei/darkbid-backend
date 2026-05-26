@@ -1,0 +1,16 @@
+# 这是一个注释
+# 忽略 Python 编译产生的缓存文件夹
+__pycache__/
+*.py[cod]
+
+# 忽略虚拟环境文件夹 (非常重要！)
+venv/
+env/
+.venv/
+
+# 忽略 PyCharm 的配置文件夹
+.idea/
+
+# 忽略操作系统生成的垃圾文件
+.DS_Store
+Thumbs.db

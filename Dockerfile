@@ -1,4 +1,4 @@
-FROM ccr.ccs.tencentyun.com/library/python:3.9-slim
+FROM python:3.9-slim
 
 # 安装编译 lxml 所需的系统依赖（这是关键修复）
 RUN apt-get update && apt-get install -y \

@@ -16,7 +16,7 @@ from utils.helpers import log
 from utils.file_handler import FileHandler
 
 # ========== 默认配置 ==========
-DEFAULT_INPUT_DIR = "clients/input"
+DEFAULT_INPUT_DIR = "clients/blind_bid_tec_doc"
 DEFAULT_RULES = "clients/config/rules.json"
 DEFAULT_OUTPUT = "clients/output"
 
@@ -128,14 +128,15 @@ class DarkMarkInspector:
         log("\n--- 正在生成输出文件 ---")
         step_start = time.time()
 
-        # 生成 HTML 报告（使用摘要数据，兼容旧格式）
+        # 生成 HTML 报告（传入 rule_summary 以显示规则清单）
         report_path = self.report_generator.generate_html_report(
             file_path=file_path,
             format_issues=format_issues,
-            ner_data=ner_full_results.get("summary", ner_full_results),  # 兼容
+            ner_data=ner_full_results.get("summary", ner_full_results),
             ocr_data=ocr_results,
             output_dir=output_dir,
-            suffix="_检查报告"
+            suffix="_检查报告",
+            rule_summary=self.format_checker.rule_summary  # 【关键修复】传递规则清单
         )
 
         # 生成批注版 Word（传入完整实体数据，支持精确位置）

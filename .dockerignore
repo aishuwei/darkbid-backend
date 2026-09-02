@@ -1,0 +1,39 @@
+# 虚拟环境（几百MB，绝对不能进）
+venv/
+env/
+.venv/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+
+# Git
+.git/
+.gitignore
+
+# 本地历史文件（上传的文档和生成的报告）
+clients/output/
+clients/blind_bid_tec_doc/
+backend/tmp/
+*.docx
+*.html
+
+# 命令行工具（后端用不到）
+format_only.py
+main.py
+memo.txt
+requirements.txt.bak
+
+# 大模型相关（本地保留，Docker 不需要）
+core/ner_engine.py
+core/ocr_engine.py
+
+# 其他
+.DS_Store
+Thumbs.db
+.idea/
+*.md

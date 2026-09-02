@@ -1,0 +1,181 @@
+{
+  "document_info": {
+    "name": null,
+    "description": "技术文件暗标编制要求：A4纸张，黑色文字图表，标题及正文宋体四号常规字，图内字体字号不限，禁止加粗加色倾斜下划线；上边距2.5cm其余2cm，左对齐，首行缩进2字符，固定值30磅行距，无空格无空行，无页眉页脚页码，无封面目录，总页数≤300页，不得出现身份识别信息。",
+    "generated_date": "2026-08-28"
+  },
+  "page_check": {
+    "enabled": true,
+    "description": "A4纸张大小，总页数不得超过300页。",
+    "paper_size": "A4",
+    "max_pages": 300,
+    "no_blank_pages": null
+  },
+  "margin_check": {
+    "enabled": true,
+    "description": "上边距2.5厘米，其余（下、左、右）均为2厘米。",
+    "top_cm": 2.5,
+    "bottom_cm": 2.0,
+    "left_cm": 2.0,
+    "right_cm": 2.0,
+    "tolerance_cm": 0.1
+  },
+  "font_check": {
+    "enabled": true,
+    "description": "标题及正文部分所用文字均采用宋体四号常规字；图、表内字体字号不作要求；所有字体均不得出现加粗、加色、倾斜、下划线等标记，颜色黑色。",
+    "chinese_font": "宋体",
+    "size_pt": 14,
+    "color_hex": "000000",
+    "allow_bold": false,
+    "allow_italic": false,
+    "allow_underline": false,
+    "allow_color_change": false
+  },
+  "paragraph_check": {
+    "enabled": true,
+    "description": "正文行间距为固定值30磅，左对齐，首行缩进2字符，不得有空格，段落前后不设置空行。",
+    "alignment": "left",
+    "line_spacing_rule": "exact",
+    "line_spacing_pt": 30,
+    "line_spacing_tolerance_pt": 0.5,
+    "first_line_indent_chars": 2,
+    "first_line_indent_tolerance_chars": 0.3,
+    "space_before_pt": 0,
+    "space_after_pt": 0,
+    "space_tolerance_pt": 0.5,
+    "allow_space_as_indent": false,
+    "no_empty_paragraphs": true,
+    "allow_left_indent": null,
+    "allow_right_indent": null
+  },
+  "structure_check": {
+    "enabled": true,
+    "description": "不做封面和目录，不得设置页眉、页脚和页码。",
+    "allow_toc": false,
+    "allow_header": false,
+    "allow_footer": false,
+    "allow_page_number": false,
+    "allow_cover": false
+  },
+  "table_check": {
+    "enabled": false,
+    "description": null,
+    "table_alignment": null,
+    "table_text_alignment": null,
+    "table_indent_none": null,
+    "table_spacing_none": null,
+    "table_font_family": null,
+    "table_font_size_pt": null,
+    "table_font_color_hex": null,
+    "table_allow_bold": null,
+    "table_allow_italic": null,
+    "table_allow_underline": null,
+    "table_allow_color_change": null
+  },
+  "heading_check": {
+    "enabled": false,
+    "description": null,
+    "identification": {
+      "method": "regex",
+      "patterns": {},
+      "style_mapping": null
+    },
+    "level_rules": {
+      "level_1": {
+        "enabled": false,
+        "chinese_font": null,
+        "size_pt": null,
+        "color_hex": null,
+        "allow_bold": null,
+        "allow_italic": null,
+        "allow_underline": null,
+        "allow_color_change": null,
+        "alignment": null,
+        "number_format": null
+      },
+      "level_2": {
+        "enabled": false,
+        "chinese_font": null,
+        "size_pt": null,
+        "color_hex": null,
+        "allow_bold": null,
+        "allow_italic": null,
+        "allow_underline": null,
+        "allow_color_change": null,
+        "alignment": null,
+        "number_format": null
+      },
+      "level_3": {
+        "enabled": false,
+        "chinese_font": null,
+        "size_pt": null,
+        "color_hex": null,
+        "allow_bold": null,
+        "allow_italic": null,
+        "allow_underline": null,
+        "allow_color_change": null,
+        "alignment": null,
+        "number_format": null
+      },
+      "level_4": {
+        "enabled": false,
+        "chinese_font": null,
+        "size_pt": null,
+        "color_hex": null,
+        "allow_bold": null,
+        "allow_italic": null,
+        "allow_underline": null,
+        "allow_color_change": null,
+        "alignment": null,
+        "number_format": null
+      },
+      "level_5": {
+        "enabled": false,
+        "chinese_font": null,
+        "size_pt": null,
+        "color_hex": null,
+        "allow_bold": null,
+        "allow_italic": null,
+        "allow_underline": null,
+        "allow_color_change": null,
+        "alignment": null,
+        "number_format": null
+      },
+      "level_6": {
+        "enabled": false,
+        "chinese_font": null,
+        "size_pt": null,
+        "color_hex": null,
+        "allow_bold": null,
+        "allow_italic": null,
+        "allow_underline": null,
+        "allow_color_change": null,
+        "alignment": null,
+        "number_format": null
+      },
+      "level_7": {
+        "enabled": false,
+        "chinese_font": null,
+        "size_pt": null,
+        "color_hex": null,
+        "allow_bold": null,
+        "allow_italic": null,
+        "allow_underline": null,
+        "allow_color_change": null,
+        "alignment": null,
+        "number_format": null
+      }
+    },
+    "validation": {
+      "check_continuity": false,
+      "check_hierarchy": false,
+      "check_orphan_levels": false
+    }
+  },
+  "punctuation_check": {
+    "enabled": true,
+    "description": "强制使用中文标点，禁止中文字符间空格。",
+    "require_chinese": true,
+    "no_space_between_chars": true
+  }
+}

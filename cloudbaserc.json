@@ -1,0 +1,28 @@
+{
+  "version": "2.0",
+  "envId": "darkbid-d8gxspsbued4a2867",
+  "region": "ap-shanghai",
+  "framework": {
+    "name": "darkbid",
+    "plugins": {
+      "backend": {
+        "use": "@cloudbase/framework-plugin-container",
+        "inputs": {
+          "serviceName": "darkbid-backend",
+          "servicePath": "/",
+          "localPath": "./",
+          "filePath": "Dockerfile",
+          "containerPort": 5000,
+          "minNum": 0,
+          "maxNum": 5,
+          "cpu": 0.25,
+          "mem": 0.5,
+          "targetMem": 0.5,
+          "policyType": "cpu",
+          "policyThreshold": 60,
+          "envVariables": {}
+        }
+      }
+    }
+  }
+}

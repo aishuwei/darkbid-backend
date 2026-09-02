@@ -16,6 +16,7 @@ import glob
 import json
 import re
 from datetime import datetime
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
@@ -49,7 +50,7 @@ except ImportError:
     DocumentAnnotator = None
     log("警告: 未找到 DocumentAnnotator，将跳过批注版 Word 生成")
 
-DEFAULT_INPUT_DIR = "clients/input"
+DEFAULT_INPUT_DIR = "clients/blind_bid_tec_doc"
 DEFAULT_RULES = "clients/config/rules.json"
 DEFAULT_OUTPUT = "clients/output"
 
@@ -80,12 +81,13 @@ class FormatOnlyInspector:
     只执行 FormatChecker，不依赖 PyTorch / PaddleOCR 等重型库。
     """
 
+    # 修改：将 "object_check" 改为 "table_check"，与配置文件键名保持一致
     CHECK_ITEMS = {
         "page_check": ("纸张大小与页数", "检查文档是否为 A4 纸张，以及页数是否可能超标"),
         "margin_check": ("页边距", "检查上/下/左/右边距是否符合暗标要求的固定值"),
         "font_check": ("字体、字号及样式", "检查中文字体、字号、颜色、加粗、倾斜、下划线及字符间空格"),
         "paragraph_check": ("段落格式", "检查对齐方式、行距模式与数值、首行缩进、左右缩进、段前段后间距及空段落"),
-        "object_check": ("表格与图片格式", "检查表格整体对齐、表内文字样式、图片居中对齐等"),
+        "table_check": ("表格与图片格式", "检查表格整体对齐、表内文字样式、图片居中对齐等"),
         "structure_check": ("文档结构", "检查页眉、页脚、页码等是否违规存在"),
         "punctuation_check": ("标点符号规范", "检查是否存在英文标点混用在中文语境中的情况"),
     }
@@ -108,7 +110,7 @@ class FormatOnlyInspector:
             self.rules = json.load(f)
 
     def run_inspection(self, file_path, output_dir=DEFAULT_OUTPUT):
-        """执行格式检查并生成增强报告 + 批注版 Word"""
+        """执行格式检查并生成增强报告 + 批注版 Word（先出报告，后出批注）"""
         log("=== 启动暗标格式专项检查 ===")
         overall_start = time.time()
 
@@ -130,34 +132,39 @@ class FormatOnlyInspector:
         # 3. 生成检查清单
         checklist = self._build_checklist(classified)
 
-        # 4. 【新增】生成批注版 Word（仅含格式问题批注）
-        annotated_path = None
-        if self.annotator is not None:
-            log("\n--- 正在生成批注版 Word ---")
-            step_start = time.time()
-            annotated_path = self.annotator.generate_annotated_copy(
-                original_path=file_path,
-                format_issues=format_issues,
-                ner_data=None,      # 格式专项：不传入 NER
-                ocr_data=None,      # 格式专项：不传入 OCR
-                output_dir=output_dir,
-                suffix="_批注版"     # 与主流程保持一致
-            )
-            step_time = time.time() - step_start
-            log(f"⏱️ 批注版生成耗时: {step_time:.2f} 秒")
-        else:
-            log("⚠️  批注生成器未加载，跳过批注版 Word 输出")
-
-        # 5. 生成 HTML 报告（传入 annotated_path）
+        # 4. 【修改】先生成 HTML 报告（不等待批注版）
+        log("\n--- 正在生成 HTML 报告 ---")
         report_path = self._generate_report(
             file_path=file_path,
             format_issues=format_issues,
             checklist=checklist,
-            annotated_path=annotated_path,
+            annotated_path=None,      # 此时批注版尚未生成
             output_dir=output_dir,
         )
 
-        # 6. 控制台汇总
+        # 5. 【新增】后台生成批注版 Word（不影响报告）
+        annotated_path = None
+        if self.annotator is not None:
+            log("\n--- 正在后台生成批注版 Word（不会阻塞报告查看） ---")
+            step_start = time.time()
+            try:
+                annotated_path = self.annotator.generate_annotated_copy(
+                    original_path=file_path,
+                    format_issues=format_issues,
+                    ner_data=None,
+                    ocr_data=None,
+                    output_dir=output_dir,
+                    suffix="_批注版"
+                )
+                step_time = time.time() - step_start
+                log(f"⏱️ 批注版生成耗时: {step_time:.2f} 秒")
+                log(f"📁 批注版 Word 保存至: {annotated_path}")
+            except Exception as e:
+                log(f"❌ 批注版生成失败: {e}")
+        else:
+            log("⚠️  批注生成器未加载，跳过批注版 Word 输出")
+
+        # 6. 控制台汇总（包含报告路径和批注版路径）
         total_time = time.time() - overall_start
         self._print_summary(format_issues, checklist, report_path, annotated_path, total_time)
 
@@ -187,7 +194,7 @@ class FormatOnlyInspector:
         if any(k in issue for k in ["对齐方式", "行距", "缩进", "间距", "空段落", "空格或", "Tab"]):
             return "paragraph_check"
         if any(k in issue for k in ["表格", "图片"]):
-            return "object_check"
+            return "table_check"
         if any(k in issue for k in ["页眉", "页脚", "页码"]):
             return "structure_check"
         if "标点" in issue:
@@ -215,7 +222,7 @@ class FormatOnlyInspector:
         return checklist
 
     # ------------------------------------------------------------------
-    # HTML 报告生成（【新增】annotated_path 参数与输出文件区域）
+    # HTML 报告生成（【修改】支持 annotated_path 为 None 的情况）
     # ------------------------------------------------------------------
     def _generate_report(self, file_path, format_issues, checklist, annotated_path, output_dir):
         file_name = os.path.basename(file_path)
@@ -260,7 +267,7 @@ class FormatOnlyInspector:
             </div>
             """
 
-        # 【新增】输出文件区域 HTML
+        # 【修改】输出文件区域 HTML：根据 annotated_path 状态显示不同内容
         if annotated_path and os.path.exists(annotated_path):
             anno_basename = os.path.basename(annotated_path)
             output_files_html = f"""
@@ -284,7 +291,31 @@ class FormatOnlyInspector:
                 </div>
             </div>
             """
+        elif annotated_path is None:
+            # 情况：批注版尚未生成（正在后台生成中）
+            output_files_html = f"""
+            <div class="section">
+                <div class="section-title">📁 输出文件</div>
+                <div class="file-list">
+                    <div class="file-item">
+                        <span class="file-icon">📄</span>
+                        <div>
+                            <div class="file-name">HTML 检查报告</div>
+                            <div class="file-path">{os.path.basename(file_name)}_格式检查报告.html</div>
+                        </div>
+                    </div>
+                    <div class="file-item">
+                        <span class="file-icon">⏳</span>
+                        <div>
+                            <div class="file-name">批注版 Word</div>
+                            <div class="file-path">正在后台生成中，请稍后查看输出目录...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """
         else:
+            # 生成失败或未加载批注器
             output_files_html = f"""
             <div class="section">
                 <div class="section-title">📁 输出文件</div>
@@ -297,10 +328,10 @@ class FormatOnlyInspector:
                         </div>
                     </div>
                     <div class="file-item disabled">
-                        <span class="file-icon">📝</span>
+                        <span class="file-icon">⚠️</span>
                         <div>
                             <div class="file-name">批注版 Word</div>
-                            <div class="file-path">未生成（DocumentAnnotator 未加载或生成失败）</div>
+                            <div class="file-path">未生成（批注生成器未加载或生成失败）</div>
                         </div>
                     </div>
                 </div>
@@ -585,7 +616,7 @@ class FormatOnlyInspector:
                 status_html = '<span class="tag tag-fail">❌ 未通过</span>'
                 count_html = str(item["issue_count"])
                 snippets = [f"<code>{self._escape_html(iss[:60])}</code>" for iss in item["issues"]]
-                preview = f"{item['desc']}<<br><div class='issue-preview'>典型问题：" + " | ".join(snippets) + "</div>"
+                preview = f"{item['desc']}<br><div class='issue-preview'>典型问题：" + " | ".join(snippets) + "</div>"
                 row_class = "failed"
 
             rows.append(f"""
@@ -653,7 +684,7 @@ class FormatOnlyInspector:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     # ------------------------------------------------------------------
-    # 【新增】控制台汇总增加 annotated_path 参数
+    # 【修改】控制台汇总增加 annotated_path 参数
     # ------------------------------------------------------------------
     def _print_summary(self, format_issues, checklist, report_path, annotated_path, total_time):
         print("\n" + "=" * 60)

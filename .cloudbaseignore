@@ -1,0 +1,38 @@
+# 虚拟环境（核心问题）
+venv/
+env/
+.venv/
+pip-wheel-metadata/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
+
+# Git
+.git/
+.gitignore
+
+# 本地历史文件（上传的文档和生成的报告）
+clients/output/
+clients/blind_bid_tec_doc/
+backend/tmp/
+*.docx
+*.html
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+logs/

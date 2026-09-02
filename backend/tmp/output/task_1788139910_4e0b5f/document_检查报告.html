@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>暗标合规检查报告 - document.docx</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f5f6fa;
+            color: #2c3e50;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 { font-size: 24px; margin-bottom: 8px; }
+        .header .meta { font-size: 14px; opacity: 0.9; }
+        .status-card {
+            padding: 25px 30px;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 12px 30px;
+            border-radius: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            color: white;
+            background: #27ae60;
+            margin-bottom: 15px;
+        }
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        .stat-item { text-align: center; }
+        .stat-num { font-size: 28px; font-weight: bold; color: #27ae60; }
+        .stat-label { font-size: 13px; color: #7f8c8d; margin-top: 4px; }
+        .section {
+            padding: 25px 30px;
+            border-bottom: 1px solid #eee;
+        }
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th {
+            background: #f8f9fa;
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: top;
+        }
+        tr:hover { background: #fafbfc; }
+        .current { color: #e74c3c; }
+        .required { color: #27ae60; }
+        .footer {
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #95a5a6;
+            background: #fafbfc;
+        }
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .header { padding: 20px; }
+            .header h1 { font-size: 20px; }
+            .section { padding: 15px; }
+            th, td { padding: 8px 6px; font-size: 13px; }
+            .stats { gap: 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📋 暗标合规检查报告</h1>
+            <div class="meta">document.docx &nbsp;|&nbsp; 检查时间: 2026-08-31 09:33:09</div>
+        </div>
+
+        <div class="status-card">
+            <div class="status-badge">✅ 检查通过</div>
+            <div class="stats">
+                <div class="stat-item"><div class="stat-num">0</div><div class="stat-label">总问题数</div></div>
+                <div class="stat-item"><div class="stat-num">0</div><div class="stat-label">格式问题</div></div>
+                <div class="stat-item"><div class="stat-num">0</div><div class="stat-label">敏感信息</div></div>
+                <div class="stat-item"><div class="stat-num">0</div><div class="stat-label">图片数量</div></div>
+            </div>
+        </div>
+
+        <div class="section"><div class="section-title">📜 检测规则</div><p>未提供规则清单，请检查配置。</p></div>
+
+        <div class="section">
+            <div class="section-title">🔍 问题明细</div>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead><tr><th style="width:40px">#</th><th style="width:80px">位置</th><th>问题描述</th><th style="width:120px">当前值</th><th style="width:120px">要求值</th></tr></thead>
+                    <tbody>
+            <tr>
+                <td colspan="5" style="text-align:center; color: #27ae60; font-weight: bold;">
+                    ✅ 未发现任何问题，文档符合暗标排版要求！
+                </td>
+            </tr>
+            </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="footer">本报告由暗标合规检查系统自动生成，仅供参考使用</div>
+    </div>
+</body>
+</html>

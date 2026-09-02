@@ -1,0 +1,186 @@
+20260509ner
+import hanlp
+from utils.helpers import log
+
+
+class NEREngine:
+    """
+    基于 HanLP 的实体识别引擎
+    职责：从文本中提取人名、地名、机构名，用于辅助暗标合规性检查
+    特点：独立运行，支持 Word 文本和 OCR 文本输入
+    """
+
+    def __init__(self):
+        self.ner_model = None
+        self._load_model()
+
+    def _load_model(self):
+        """
+        加载 HanLP 预训练 NER 模型
+        使用 MSRA 数据集训练的模型，适合识别中文里的机构、人名、地名
+        """
+        try:
+            log("正在初始化 HanLP 实体识别模型...")
+            # 加载 MSRA NER 模型 (Electra Small 版本，速度与精度平衡)
+            # 首次运行会自动下载模型到 ~/.hanlp 目录
+            self.ner_model = hanlp.load(hanlp.pretrained.ner.MSRA_NER_ELECTRA_SMALL_ZH)
+            log("HanLP 模型加载成功")
+        except Exception as e:
+            log(f"❌ HanLP 模型加载失败: {e}")
+            log("请检查网络连接或手动下载模型")
+            import traceback
+            traceback.print_exc()  # 打印完整堆栈
+
+    def extract_entities(self, text_input):
+        """
+        核心方法：提取实体
+        :param text_input: 字符串 或 字符串列表 (支持单句或批量)
+        :return: 包含实体信息的列表 [{"text": "...", "type": "..."}, ...]
+        """
+        if not self.ner_model or not text_input:
+            return []
+
+        # 统一转换为句子列表
+        if isinstance(text_input, str):
+            if not text_input.strip():
+                return []
+            sentences = [text_input]
+        else:
+            sentences = [s for s in text_input if s and s.strip()]
+
+        if not sentences:
+            return []
+
+        all_entities = []
+
+        try:
+            # 逐个句子进行预测，避免批量推理的格式问题
+            for sentence in sentences:
+                # 注意：必须传入列表，模型返回列表的列表
+                result = self.ner_model([sentence])
+                if not result or not isinstance(result, list) or len(result) == 0:
+                    continue
+
+                # 取第一个（也是唯一一个）句子的实体列表
+                sentence_entities = result[0]
+
+                # 如果结果不是列表，尝试转换为列表
+                if not isinstance(sentence_entities, list):
+                    if isinstance(sentence_entities, tuple) and len(sentence_entities) >= 4:
+                        sentence_entities = [sentence_entities]
+                    else:
+                        continue
+
+                # 解析每个实体
+                for ent in sentence_entities:
+                    # 兼容多种格式：(实体, 类型, 开始, 结束) 或 (实体, 类型, 开始, 结束, 得分)
+                    if isinstance(ent, (list, tuple)) and len(ent) >= 4:
+                        entity_text = ent[0]
+                        entity_type = ent[1]
+                        # start_idx, end_idx = ent[2], ent[3]  # 暂未使用
+
+                        # 过滤单字实体
+                        if len(entity_text) <= 1:
+                            continue
+
+                        # 类型标准化：处理不同标签集
+                        type_upper = entity_type.upper()
+                        if type_upper in ('ORG', 'ORGANIZATION'):
+                            normalized_type = 'ORG'
+                        elif type_upper in ('PER', 'PERSON', 'NH'):
+                            normalized_type = 'PER'
+                        elif type_upper in ('LOC', 'LOCATION', 'NS'):
+                            normalized_type = 'LOC'
+                        else:
+                            normalized_type = 'OTHER'
+
+                        all_entities.append({
+                            "text": entity_text,
+                            "type": normalized_type,
+                            "source_sentence": sentence  # 保留来源句子
+                        })
+        except Exception as e:
+            log(f"实体识别推理出错: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return all_entities
+
+
+    def scan_document(self, word_text_list=None, ocr_text_list=None):
+        """
+        综合扫描入口
+        :param word_text_list: Word 解析出的段落文本列表
+        :param ocr_text_list: OCR 识别出的图片文本列表
+        """
+        log("正在启动实体识别扫描...")
+
+        combined_texts = []
+
+        # 1. 收集 Word 文本
+        if word_text_list:
+            # 过滤掉太短的段落，节省算力
+            valid_word_texts = [t for t in word_text_list if len(t.strip()) > 5]
+            combined_texts.extend(valid_word_texts)
+            log(f"已载入 {len(valid_word_texts)} 段 Word 文本")
+
+        # 2. 收集 OCR 文本 (如果有)
+        if ocr_text_list:
+            valid_ocr_texts = [t for t in ocr_text_list if len(t.strip()) > 5]
+            combined_texts.extend(valid_ocr_texts)
+            log(f"已载入 {len(valid_ocr_texts)} 段 OCR 文本")
+
+        if not combined_texts:
+            log("没有有效文本可供扫描")
+            return []
+
+        # 3. 执行识别
+        # 为了性能，可以分批处理，这里简单起见直接全部传入
+        # 注意：HanLP 支持批量处理，速度很快
+        entities = self.extract_entities(combined_texts)
+
+        # 4. 结果去重与整理
+        # 将实体按类型分组
+        result_summary = {
+            "ORG": [],  # 机构名（高风险）
+            "PER": [],  # 人名（高风险）
+            "LOC": [],  # 地名（中风险）
+            "OTHER": []
+        }
+
+        seen = set()
+        for ent in entities:
+            # 简单去重：同一个文档里多次出现的同一个实体只报一次
+            key = f"{ent['type']}_{ent['text']}"
+            if key not in seen:
+                seen.add(key)
+                if ent['type'] in result_summary:
+                    result_summary[ent['type']].append(ent['text'])
+                else:
+                    result_summary['OTHER'].append(ent['text'])
+
+        return result_summary
+
+
+
+# --- 独立运行测试代码 ---
+if __name__ == "__main__":
+    print("=== 独立测试 NER 引擎 ===")
+    engine = NEREngine()
+
+    # 模拟输入：一段包含潜在敏感信息的文本
+    test_text = [
+        "华为技术有限公司在深圳发布了新产品。",
+        "项目经理张三表示，项目将在北京顺利进行。",
+        "自然语言处理技术正在改变人机交互方式。"  # 这句应该没什么实体
+    ]
+
+    results = engine.scan_document(word_text_list=test_text)
+
+    print("\n=== 识别结果 ===")
+    if results['ORG']:
+        print(f"🏢 发现机构: {results['ORG']}")
+    if results['PER']:
+        print(f"👤 发现人名: {results['PER']}")
+    if results['LOC']:
+        print(f"📍 发现地名: {results['LOC']}")

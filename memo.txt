@@ -1,0 +1,334 @@
+20260609
+next 3 weeks plan
+0609-0612 done well the local program, add LLM2ruler streamlit2page codenumeber make a well done local
+0615-0619 make the mico-app name chaged(xiao chengxu genming renzheng ) qianduanxiugai =webpage
+0622-0629 docker cloudtuoguan kaitong yun tuoguan kaitongapi rongqihua xiaochengxu shangxian
+
+20260610
+
+20260616
+0612nothing done  0616mircoapp change name and done zhe local one 测试
+20260827
+one point we can make one verey sample one is only guizhou darkbid one 
+so we can make the micro on line qiuke more。
+now we can make no need the LLM api make it quik
+uplode.js 
+const app = getApp()
+const api = require('../../utils/api.js')
+
+Page({
+  data: {
+    currentStep: 1,
+    requirementType: 'text',
+    requirementText: '',
+    requirementFile: '',
+    requirementFileName: '',
+    documentFile: '',
+    documentFileName: '',
+    generatingRules: false,
+    uploadingDoc: false,
+    taskId: ''
+  },
+
+  switchType(e) {
+    const type = e.currentTarget.dataset.type
+    this.setData({ requirementType: type })
+  },
+
+  onTextInput(e) {
+    this.setData({ requirementText: e.detail.value })
+  },
+
+  chooseReqFile() {
+    wx.chooseMessageFile({
+      count: 1,
+      type: 'file',
+      extension: ['docx', 'doc', 'txt'],
+      success: (res) => {
+        const file = res.tempFiles[0]
+        this.setData({
+          requirementFile: file.path,
+          requirementFileName: file.name
+        })
+      }
+    })
+  },
+
+  chooseReqImage() {
+    wx.chooseImage({
+      count: 1,
+      sourceType: ['album', 'camera'],
+      success: (res) => {
+        this.setData({
+          requirementFile: res.tempFilePaths[0],
+          requirementFileName: '图片'
+        })
+      }
+    })
+  },
+
+  generateRules() {
+    const { requirementType, requirementText, requirementFile } = this.data
+
+    if (requirementType === 'text' && !requirementText.trim()) {
+      wx.showToast({ title: '请输入格式要求', icon: 'none' })
+      return
+    }
+    if ((requirementType === 'file' || requirementType === 'image') && !requirementFile) {
+      wx.showToast({ title: '请上传文件', icon: 'none' })
+      return
+    }
+
+    this.setData({ generatingRules: true })
+    wx.showLoading({ title: '生成配置中...' })
+
+    // 调用后端
+    if (requirementType === 'text') {
+      api.uploadRequirementText(requirementText)
+        .then(res => {
+          if (res.success) {
+            return api.generateRules(res.task_id)
+          }
+          throw new Error(res.message)
+        })
+        .then(res => {
+          wx.hideLoading()
+          this.setData({
+            generatingRules: false,
+            taskId: res.task_id,
+            currentStep: 2
+          })
+          wx.showToast({ title: '配置已生成', icon: 'success' })
+        })
+        .catch(err => {
+          wx.hideLoading()
+          this.setData({ generatingRules: false })
+          wx.showToast({ title: '错误: ' + (err.message || '请检查后端'), icon: 'none', duration: 3000 })
+          console.error('生成配置失败:', err)
+        })
+    } else {
+      // 文件上传
+      api.uploadRequirementFile(requirementFile)
+        .then(res => {
+          if (res.success) {
+            return api.generateRules(res.task_id)
+          }
+          throw new Error(res.message)
+        })
+        .then(res => {
+          wx.hideLoading()
+          this.setData({
+            generatingRules: false,
+            taskId: res.task_id,
+            currentStep: 2
+          })
+          wx.showToast({ title: '配置已生成', icon: 'success' })
+        })
+        .catch(err => {
+          wx.hideLoading()
+          this.setData({ generatingRules: false })
+          wx.showToast({ title: '错误: ' + (err.message || '请检查后端'), icon: 'none', duration: 3000 })
+          console.error('生成配置失败:', err)
+        })
+    }
+  },
+
+  chooseDocFile() {
+    wx.chooseMessageFile({
+      count: 1,
+      type: 'file',
+      extension: ['docx'],
+      success: (res) => {
+        const file = res.tempFiles[0]
+        if (file.size > 1048576) {
+          wx.showToast({ title: '文件超过1MB限制', icon: 'none' })
+          return
+        }
+        this.setData({
+          documentFile: file.path,
+          documentFileName: file.name
+        })
+      }
+    })
+  },
+
+  startCheck() {
+    const { documentFile, taskId } = this.data
+    if (!documentFile) {
+      wx.showToast({ title: '请上传技术文件', icon: 'none' })
+      return
+    }
+    if (!taskId) {
+      wx.showToast({ title: '请先生成配置', icon: 'none' })
+      return
+    }
+
+    this.setData({ uploadingDoc: true })
+    wx.showLoading({ title: '上传检测中...' })
+
+    // 调用后端上传文件
+    api.uploadDocument(documentFile, taskId)
+      .then(res => {
+        if (res.success) {
+          // 开始检查
+          return api.startCheck(taskId)
+        }
+        throw new Error(res.message)
+      })
+      .then(res => {
+        wx.hideLoading()
+        this.setData({ uploadingDoc: false })
+        
+        if (res.success) {
+          app.globalData.taskId = taskId
+          wx.navigateTo({
+            url: '/pages/waiting/waiting?taskId=' + taskId
+          })
+        } else {
+          wx.showToast({ title: res.message || '检查失败', icon: 'none' })
+        }
+      })
+      .catch(err => {
+        wx.hideLoading()
+        this.setData({ uploadingDoc: false })
+        wx.showToast({ title: '错误: ' + (err.message || '请检查后端'), icon: 'none', duration: 3000 })
+        console.error('检查失败:', err)
+      })
+  },
+
+  goBack() {
+    this.setData({ currentStep: 1 })
+  }
+})
+then we will change it as simple to guizhou only
+
+pages/upload/upload.wxml
+<view class="container">
+  <!-- 步骤指示器 -->
+  <view class="step-bar">
+    <view class="step-item {{currentStep >= 1 ? 'active' : ''}}">
+      <view class="step-dot">1</view>
+      <text class="step-label">格式要求</text>
+    </view>
+    <view class="step-line {{currentStep >= 2 ? 'active' : ''}}"></view>
+    <view class="step-item {{currentStep >= 2 ? 'active' : ''}}">
+      <view class="step-dot">2</view>
+      <text class="step-label">技术文件</text>
+    </view>
+  </view>
+
+  <!-- 步骤1：上传格式要求 -->
+  <view class="step-content" wx:if="{{currentStep === 1}}">
+    <view class="card">
+      <text class="card-title">📋 上传招标文件格式要求</text>
+      <text class="card-desc">请提供暗标排版的具体要求，支持以下方式：</text>
+
+      <!-- 切换输入方式 -->
+      <view class="type-tabs">
+        <view class="tab {{requirementType === 'text' ? 'active' : ''}}" bindtap="switchType" data-type="text">
+          <text>📝 粘贴文本</text>
+        </view>
+        <view class="tab {{requirementType === 'file' ? 'active' : ''}}" bindtap="switchType" data-type="file">
+          <text>📄 上传文件</text>
+        </view>
+        <view class="tab {{requirementType === 'image' ? 'active' : ''}}" bindtap="switchType" data-type="image">
+          <text>📷 上传图片</text>
+        </view>
+      </view>
+
+      <!-- 文本输入 -->
+      <view class="input-area" wx:if="{{requirementType === 'text'}}">
+        <textarea 
+          class="text-input" 
+          placeholder="请粘贴招标文件中的格式要求内容，例如：纸张A4、页边距上下2.54cm左右3.17cm、字体宋体小四号、行距固定值28磅..."
+          value="{{requirementText}}"
+          bindinput="onTextInput"
+          maxlength="5000"
+        />
+        <text class="char-count">{{requirementText.length}}/5000</text>
+      </view>
+
+      <!-- 文件上传 -->
+      <view class="file-area" wx:if="{{requirementType === 'file'}}">
+        <view class="upload-box" bindtap="chooseReqFile" wx:if="{{!requirementFile}}">
+          <text class="upload-icon">📁</text>
+          <text class="upload-text">点击选择Word或文本文件</text>
+          <text class="upload-hint">支持 .docx .doc .txt</text>
+        </view>
+        <view class="file-preview" wx:if="{{requirementFile}}">
+          <text class="file-icon">📄</text>
+          <text class="file-name">{{requirementFileName}}</text>
+          <text class="file-change" bindtap="chooseReqFile">更换</text>
+        </view>
+      </view>
+
+      <!-- 图片上传 -->
+      <view class="file-area" wx:if="{{requirementType === 'image'}}">
+        <view class="upload-box" bindtap="chooseReqImage" wx:if="{{!requirementFile}}">
+          <text class="upload-icon">📷</text>
+          <text class="upload-text">点击选择或拍照</text>
+          <text class="upload-hint">支持相册或相机</text>
+        </view>
+        <view class="image-preview" wx:if="{{requirementFile}}">
+          <image src="{{requirementFile}}" mode="aspectFit" class="preview-img"/>
+          <text class="file-change" bindtap="chooseReqImage">更换</text>
+        </view>
+      </view>
+
+      <button 
+        class="btn-primary" 
+        bindtap="generateRules"
+        loading="{{generatingRules}}"
+        disabled="{{generatingRules}}"
+      >
+        {{generatingRules ? '生成配置中...' : '✅ 生成检查配置'}}
+      </button>
+    </view>
+  </view>
+
+  <!-- 步骤2：上传技术文件 -->
+  <view class="step-content" wx:if="{{currentStep === 2}}">
+    <view class="card">
+      <view class="card-header">
+        <text class="card-title">📄 上传暗标技术文件</text>
+        <text class="back-btn" bindtap="goBack">← 返回上一步</text>
+      </view>
+
+      <view class="alert-box">
+        <text class="alert-icon">⚠️</text>
+        <view class="alert-text">
+          <text class="alert-title">文件限制</text>
+          <text>• 格式：仅支持 .docx</text>
+          <text>• 大小：不超过 1MB</text>
+          <text>• 页数：不超过 800 页</text>
+          <text>• 超大文件可能导致检查失败</text>
+        </view>
+      </view>
+
+      <view class="file-area">
+        <view class="upload-box" bindtap="chooseDocFile" wx:if="{{!documentFile}}">
+          <text class="upload-icon">📄</text>
+          <text class="upload-text">点击选择Word文档</text>
+          <text class="upload-hint">仅支持 .docx 格式</text>
+        </view>
+        <view class="file-preview" wx:if="{{documentFile}}">
+          <text class="file-icon">📄</text>
+          <text class="file-name">{{documentFileName}}</text>
+          <text class="file-change" bindtap="chooseDocFile">更换</text>
+        </view>
+      </view>
+
+      <button 
+        class="btn-primary" 
+        bindtap="startCheck"
+        loading="{{uploadingDoc}}"
+        disabled="{{uploadingDoc}}"
+      >
+        {{uploadingDoc ? '上传检测中...' : '🚀 开始检查'}}
+      </button>
+    </view>
+  </view>
+</view>
+20260831
+now the page report show  未提供配置文件。
+

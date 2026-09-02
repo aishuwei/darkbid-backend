@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "暗标排版规则配置 Schema",
-  "description": "用于将用户上传的招标文件格式要求（图片/PDF/Word/txt）自动解析为结构化规则配置。请大模型根据原始文本中的自然语言描述，提取关键参数并填充到对应字段。",
+  "title": "暗标排版规则配置 Schema（增强版）",
+  "description": "包含页面、结构、边距、字体、段落、表格、标题、标点等全面检查配置。",
   "type": "object",
   "required": [
     "document_info",
@@ -10,434 +10,195 @@
     "font_check",
     "paragraph_check",
     "structure_check",
-    "object_check",
+    "table_check",
+    "heading_check",
     "punctuation_check"
   ],
   "properties": {
     "document_info": {
       "type": "object",
-      "description": "文档基本信息与元数据",
       "properties": {
-        "name": {
-          "type": "string",
-          "description": "规则名称，建议从招标文件标题或客户名称提取，如'吉林双盲评审暗标'"
-        },
-        "description": {
-          "type": "string",
-          "description": "规则用途描述，如'投标文件技术部分暗标排版规则'"
-        },
-        "paper_size": {
-          "type": "string",
-          "enum": [
-            "A4",
-            "A3",
-            "B5",
-            "LETTER"
-          ],
-          "description": "纸张规格。原始文本中'A4纸张'、'标准A4'等均映射为'A4'"
-        },
-        "max_pages": {
-          "type": "integer",
-          "description": "最大页数限制。若原文未提及，默认200或不填"
-        },
-        "client": {
-          "type": "string",
-          "description": "客户/项目名称，用于溯源"
-        },
-        "source_type": {
-          "type": "string",
-          "enum": [
-            "word",
-            "image",
-            "pdf",
-            "txt",
-            "manual"
-          ],
-          "description": "原始格式要求文件的类型"
-        },
-        "source_note": {
-          "type": "string",
-          "description": "原始素材备注，如'招标文件第60页截图'"
-        },
-        "created_at": {
-          "type": "string",
-          "description": "生成日期，格式YYYY-MM-DD"
-        }
-      }
+        "name": { "type": ["string", "null"], "description": "规则名称（如“××省××项目暗标规则”）" },
+        "description": { "type": ["string", "null"], "description": "规则简短说明（项目来源、适用范围等）" },
+        "generated_date": { "type": ["string", "null"], "description": "规则生成日期（YYYY-MM-DD）" }
+      },
+      "additionalProperties": false
     },
     "page_check": {
       "type": "object",
-      "description": "页面与纸张检查",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "是否启用页面检查",
-          "default": true
-        },
-        "paper_size": {
-          "type": "string",
-          "enum": [
-            "A4",
-            "A3",
-            "B5",
-            "LETTER"
-          ],
-          "description": "纸张规格，与document_info.paper_size保持一致"
-        },
-        "max_pages": {
-          "type": "integer",
-          "description": "最大页数限制"
-        }
-      }
+        "enabled": { "type": "boolean", "default": true },
+        "description": { "type": ["string", "null"] },
+        "paper_size": { "type": ["string", "null"], "enum": ["A4", "A3", "B5", "LETTER"] },
+        "max_pages": { "type": ["integer", "null"] },
+        "no_blank_pages": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
     },
     "margin_check": {
       "type": "object",
-      "description": "页边距检查。注意：中文排版中'上边距X厘米，其余Y厘米'是常见表述",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true
-        },
-        "description": {
-          "type": "string",
-          "description": "原始要求的原文摘要，如'上边距2.5厘米，其余2厘米'"
-        },
-        "top_cm": {
-          "type": "number",
-          "description": "上边距，单位厘米。常见值：2.5, 2.54, 3.0, 3.17"
-        },
-        "bottom_cm": {
-          "type": "number",
-          "description": "下边距，单位厘米"
-        },
-        "left_cm": {
-          "type": "number",
-          "description": "左边距，单位厘米"
-        },
-        "right_cm": {
-          "type": "number",
-          "description": "右边距，单位厘米"
-        },
-        "tolerance_cm": {
-          "type": "number",
-          "description": "容差，单位厘米。若原文未提及，默认0.1",
-          "default": 0.1
-        }
-      }
+        "enabled": { "type": "boolean", "default": true },
+        "description": { "type": ["string", "null"] },
+        "top_cm": { "type": ["number", "null"] },
+        "bottom_cm": { "type": ["number", "null"] },
+        "left_cm": { "type": ["number", "null"] },
+        "right_cm": { "type": ["number", "null"] },
+        "tolerance_cm": { "type": "number", "default": 0.1 }
+      },
+      "additionalProperties": false
     },
     "font_check": {
       "type": "object",
-      "description": "字体样式检查。核心难点：中文字号与磅值(pt)的换算",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true
-        },
-        "description": {
-          "type": "string",
-          "description": "原始字体要求的摘要"
-        },
-        "chinese_font": {
-          "type": "string",
-          "description": "中文字体名称，如'宋体'、'黑体'、'仿宋'、'楷体'。注意：原文'宋体'不可改为'Simsun'，保持中文名称"
-        },
-        "english_font": {
-          "type": "string",
-          "description": "英文字体，如原文提及'Tahoma'、'Times New Roman'等则填写"
-        },
-        "size_pt": {
-          "type": "number",
-          "description": "字号磅值(pt)。必须根据中文号数制换算：初号=42pt, 小初=36pt, 一号=26pt, 小一=24pt, 二号=22pt, 小二=18pt, 三号=16pt, 小三=15pt, 四号=14pt, 小四=12pt, 五号=10.5pt, 小五=9pt。若原文写'四号'，必须填14"
-        },
-        "color_hex": {
-          "type": "string",
-          "pattern": "^[0-9A-Fa-f]{6}$",
-          "description": "字体颜色，6位十六进制，不含#号。黑色='000000'，红色='FF0000'。若原文仅说'黑色'，默认'000000'"
-        },
-        "allow_bold": {
-          "type": "boolean",
-          "description": "是否允许加粗。原文'不得加粗'、'不允许加粗'、'常规字'均映射为false"
-        },
-        "allow_italic": {
-          "type": "boolean",
-          "description": "是否允许倾斜/斜体。原文'不得倾斜'映射为false"
-        },
-        "allow_underline": {
-          "type": "boolean",
-          "description": "是否允许下划线。原文'不得下划线'映射为false"
-        },
-        "allow_color_change": {
-          "type": "boolean",
-          "description": "是否允许改变字体颜色。原文'不得涂色'、'不得变色'映射为false"
-        },
-        "check_table_text": {
-          "type": "boolean",
-          "description": "是否检查表格内文字字体。原文'表内文字同正文要求'则为true",
-          "default": true
-        }
-      }
+        "enabled": { "type": "boolean", "default": true },
+        "description": { "type": ["string", "null"] },
+        "chinese_font": { "type": ["string", "null"] },
+        "size_pt": { "type": ["number", "null"] },
+        "color_hex": { "type": ["string", "null"], "pattern": "^[0-9A-Fa-f]{6}$", "default": "000000" },
+        "allow_bold": { "type": "boolean", "default": false },
+        "allow_italic": { "type": "boolean", "default": false },
+        "allow_underline": { "type": "boolean", "default": false },
+        "allow_color_change": { "type": "boolean", "default": false }
+      },
+      "additionalProperties": false
     },
     "paragraph_check": {
       "type": "object",
-      "description": "段落格式检查",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true
-        },
-        "description": {
-          "type": "string",
-          "description": "原始段落要求的摘要"
-        },
-        "alignment": {
-          "type": "string",
-          "enum": [
-            "left",
-            "center",
-            "right",
-            "justify"
-          ],
-          "description": "对齐方式。'左对齐'=left，'居中'=center，'右对齐'=right，'两端对齐'=justify"
-        },
-        "line_spacing_rule": {
-          "type": "string",
-          "enum": [
-            "single",
-            "one_half",
-            "double",
-            "exact",
-            "multiple"
-          ],
-          "description": "行距规则。'单倍'=single，'1.5倍'=one_half，'双倍'=double，'固定值'=exact，'多倍'=multiple"
-        },
-        "line_spacing_pt": {
-          "type": "number",
-          "description": "行距磅值。仅当line_spacing_rule='exact'或'multiple'时有效。如'固定值30磅'填30"
-        },
-        "line_spacing_tolerance_pt": {
-          "type": "number",
-          "description": "行距容差，单位磅。默认0.5",
-          "default": 0.5
-        },
-        "first_line_indent_chars": {
-          "type": "number",
-          "description": "首行缩进字符数。如'缩进2字符'填2，'缩进2个字符'填2"
-        },
-        "first_line_indent_tolerance_chars": {
-          "type": "number",
-          "description": "缩进容差，单位字符。默认0.3",
-          "default": 0.3
-        },
-        "space_before_pt": {
-          "type": "number",
-          "description": "段前间距，单位磅。如'无段前间距'填0"
-        },
-        "space_after_pt": {
-          "type": "number",
-          "description": "段后间距，单位磅。如'无段后间距'填0"
-        },
-        "space_tolerance_pt": {
-          "type": "number",
-          "description": "间距容差，单位磅。默认0.5",
-          "default": 0.5
-        },
-        "allow_space_as_indent": {
-          "type": "boolean",
-          "description": "是否允许用空格代替缩进。原文'不得空格代替缩进'则为false"
-        },
-        "no_space_between_chars": {
-          "type": "boolean",
-          "description": "是否禁止字符间空格。原文'字符间不得有空格'则为true"
-        },
-        "no_empty_paragraphs": {
-          "type": "boolean",
-          "description": "是否禁止空段落。原文'不得有空段落'则为true"
-        },
-        "allow_left_indent": {
-          "type": "boolean",
-          "description": "是否允许左缩进。原文'不得用左右缩进增加间距'则为false"
-        },
-        "allow_right_indent": {
-          "type": "boolean",
-          "description": "是否允许右缩进"
-        }
-      }
+        "enabled": { "type": "boolean", "default": true },
+        "description": { "type": ["string", "null"] },
+        "alignment": { "type": ["string", "null"], "enum": ["left", "center", "right", "justify"] },
+        "line_spacing_rule": { "type": ["string", "null"], "enum": ["single", "one_half", "double", "exact", "multiple"] },
+        "line_spacing_pt": { "type": ["number", "null"] },
+        "line_spacing_tolerance_pt": { "type": "number", "default": 0.5 },
+        "first_line_indent_chars": { "type": ["number", "null"] },
+        "first_line_indent_tolerance_chars": { "type": "number", "default": 0.3 },
+        "space_before_pt": { "type": ["number", "null"] },
+        "space_after_pt": { "type": ["number", "null"] },
+        "space_tolerance_pt": { "type": "number", "default": 0.5 },
+        "allow_space_as_indent": { "type": "boolean", "default": true },
+        "no_empty_paragraphs": { "type": "boolean", "default": false },
+        "allow_left_indent": { "type": "boolean", "default": true },
+        "allow_right_indent": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
     },
     "structure_check": {
       "type": "object",
-      "description": "文档结构检查（封面、目录、页眉页脚等）",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true
-        },
-        "description": {
-          "type": "string",
-          "description": "原始结构要求的摘要"
-        },
-        "allow_toc": {
-          "type": "boolean",
-          "description": "是否允许目录。原文'不做目录'、'不设目录'则为false"
-        },
-        "allow_header": {
-          "type": "boolean",
-          "description": "是否允许页眉。原文'不设页眉'则为false"
-        },
-        "allow_footer": {
-          "type": "boolean",
-          "description": "是否允许页脚。原文'不设页脚'则为false"
-        },
-        "allow_page_number": {
-          "type": "boolean",
-          "description": "是否允许页码。原文'不设页码'则为false"
-        },
-        "allow_cover": {
-          "type": "boolean",
-          "description": "是否允许封面。原文'不做封面'则为false"
-        }
-      }
+        "enabled": { "type": "boolean", "default": true },
+        "description": { "type": ["string", "null"] },
+        "allow_toc": { "type": ["boolean", "null"], "default": null },
+        "allow_header": { "type": ["boolean", "null"], "default": null },
+        "allow_footer": { "type": ["boolean", "null"], "default": null },
+        "allow_page_number": { "type": ["boolean", "null"], "default": null },
+        "allow_cover": { "type": ["boolean", "null"], "default": null }
+      },
+      "additionalProperties": false
     },
-    "object_check": {
+    "table_check": {
       "type": "object",
-      "description": "图表对象检查",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true
+        "enabled": { "type": "boolean", "default": true },
+        "description": { "type": ["string", "null"] },
+        "table_alignment": { "type": ["string", "null"], "enum": ["left", "center", "right"] },
+        "table_text_alignment": { "type": ["string", "null"], "enum": ["left", "center", "right", "justify"] },
+        "table_indent_none": { "type": ["boolean", "null"] },
+        "table_spacing_none": { "type": ["boolean", "null"] },
+        "table_font_family": { "type": ["string", "null"], "default": "宋体" },
+        "table_font_size_pt": { "type": ["number", "null"] },
+        "table_font_color_hex": { "type": ["string", "null"], "pattern": "^[0-9A-Fa-f]{6}$", "default": "000000" },
+        "table_allow_bold": { "type": ["boolean", "null"], "default": false },
+        "table_allow_italic": { "type": ["boolean", "null"], "default": false },
+        "table_allow_underline": { "type": ["boolean", "null"], "default": false },
+        "table_allow_color_change": { "type": ["boolean", "null"], "default": false }
+      },
+      "additionalProperties": false
+    },
+    "heading_check": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "description": { "type": ["string", "null"] },
+        "identification": {
+          "type": "object",
+          "properties": {
+            "method": { "type": "string", "enum": ["regex", "style", "hybrid"], "default": "regex" },
+            "patterns": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "style_mapping": {
+              "type": "object",
+              "additionalProperties": { "type": "integer" }
+            }
+          },
+          "additionalProperties": false
         },
-        "description": {
-          "type": "string",
-          "description": "原始图表要求的摘要"
+        "level_rules": {
+          "type": "object",
+          "properties": {
+            "level_1": { "$ref": "#/definitions/level_rule" },
+            "level_2": { "$ref": "#/definitions/level_rule" },
+            "level_3": { "$ref": "#/definitions/level_rule" },
+            "level_4": { "$ref": "#/definitions/level_rule" },
+            "level_5": { "$ref": "#/definitions/level_rule" },
+            "level_6": { "$ref": "#/definitions/level_rule" },
+            "level_7": { "$ref": "#/definitions/level_rule" }
+          },
+          "additionalProperties": false
         },
-        "table_alignment": {
-          "type": "string",
-          "enum": [
-            "left",
-            "center",
-            "right"
-          ],
-          "description": "表格整体对齐方式。'居中'=center"
-        },
-        "table_text_alignment": {
-          "type": "string",
-          "enum": [
-            "left",
-            "center",
-            "right",
-            "justify"
-          ],
-          "description": "表内文字对齐方式。'左对齐'=left"
-        },
-        "table_indent_none": {
-          "type": "boolean",
-          "description": "表内文字是否无缩进。原文'无缩进'则为true"
-        },
-        "table_spacing_none": {
-          "type": "boolean",
-          "description": "表内文字是否无固定行距。原文'无固定行距'则为true"
-        },
-        "image_alignment": {
-          "type": "string",
-          "enum": [
-            "left",
-            "center",
-            "right"
-          ],
-          "description": "图片对齐方式。'居中'=center"
+        "validation": {
+          "type": "object",
+          "properties": {
+            "check_continuity": { "type": "boolean", "default": false },
+            "check_hierarchy": { "type": "boolean", "default": false },
+            "check_orphan_levels": { "type": "boolean", "default": false }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "punctuation_check": {
       "type": "object",
-      "description": "标点符号检查",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": true
-        },
-        "description": {
-          "type": "string",
-          "description": "原始标点要求的摘要"
-        },
-        "require_chinese": {
-          "type": "boolean",
-          "description": "是否要求中文标点。原文'全部用中文标点'则为true"
-        },
-        "no_space_between_chars": {
-          "type": "boolean",
-          "description": "是否禁止字符间空格。与paragraph_check.no_space_between_chars语义一致"
-        }
-      }
+        "enabled": { "type": "boolean", "default": true },
+        "description": { "type": ["string", "null"] },
+        "require_chinese": { "type": "boolean", "default": true },
+        "no_space_between_chars": { "type": "boolean", "default": true }
+      },
+      "additionalProperties": false
     }
   },
-  "_conversion_guidelines": {
-    "title": "大模型转换指南（关键映射表）",
-    "font_size_mapping": {
-      "初号": 42,
-      "小初": 36,
-      "一号": 26,
-      "小一": 24,
-      "二号": 22,
-      "小二": 18,
-      "三号": 16,
-      "小三": 15,
-      "四号": 14,
-      "小四": 12,
-      "五号": 10.5,
-      "小五": 9,
-      "六号": 7.5,
-      "小六": 6.5,
-      "七号": 5.5,
-      "八号": 5
-    },
-    "alignment_mapping": {
-      "左对齐": "left",
-      "居中": "center",
-      "右对齐": "right",
-      "两端对齐": "justify",
-      "分散对齐": "justify"
-    },
-    "line_spacing_mapping": {
-      "单倍行距": "single",
-      "1.5倍行距": "one_half",
-      "双倍行距": "double",
-      "固定值": "exact",
-      "多倍行距": "multiple"
-    },
-    "boolean_inference": {
-      "否定词": [
-        "不得",
-        "不允许",
-        "禁止",
-        "不要",
-        "不可",
-        "不能",
-        "勿",
-        "严禁"
-      ],
-      "肯定词": [
-        "允许",
-        "可以",
-        "应",
-        "需要"
-      ],
-      "规则": "遇到否定词+动作（如'不得加粗'）→ 该动作的allow字段设为false；遇到'不设/不做/无'→ 对应allow字段设为false"
-    },
-    "color_inference": {
-      "黑色": "000000",
-      "红色": "FF0000",
-      "蓝色": "0000FF",
-      "白色": "FFFFFF"
-    },
-    "special_notes": [
-      "1. 若原文仅说'标题宋体四号'、'正文宋体四号'，则font_check.chinese_font='宋体'，size_pt=14",
-      "2. 若原文说'标题及正文均为宋体四号常规字'，则allow_bold=false（常规=不加粗）",
-      "3. 若原文说'所有文字不得出现加粗、加色、倾斜、下划线'，则font_check中allow_bold/allow_italic/allow_underline/allow_color_change均为false",
-      "4. 若原文说'表内文字同正文要求'，则check_table_text=true，且表内字体参数与正文一致",
-      "5. 若原文说'不做封面和目录，不设页眉页脚页码'，则allow_cover=false, allow_toc=false, allow_header=false, allow_footer=false, allow_page_number=false",
-      "6. 若原文未提及某字段，优先参考base_rules.json的默认值，或根据常识推断（如暗标通常禁止页眉页脚）",
-      "7. 所有description字段必须填写原始文本的摘要，方便人工复核时对照",
-      "8. 若同一要求在不同位置出现矛盾（如一处说'可以加粗'一处说'不得加粗'），以'不得/禁止'等更严格的表述为准，并在description中备注矛盾"
-    ]
-  }
+  "definitions": {
+    "level_rule": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "chinese_font": { "type": ["string", "null"], "default": "宋体" },
+        "size_pt": { "type": ["number", "null"] },
+        "color_hex": { "type": ["string", "null"], "pattern": "^[0-9A-Fa-f]{6}$", "default": "000000" },
+        "allow_bold": { "type": "boolean", "default": false },
+        "allow_italic": { "type": "boolean", "default": false },
+        "allow_underline": { "type": "boolean", "default": false },
+        "allow_color_change": { "type": "boolean", "default": false },
+        "alignment": { "type": ["string", "null"], "enum": ["left", "center", "right", "justify"] },
+        "number_format": {
+          "type": "object",
+          "properties": {
+            "required_prefix": { "type": ["string", "null"] },
+            "required_suffix": { "type": ["string", "null"] },
+            "allowed_suffix": { "type": "array", "items": { "type": "string" } },
+            "forbid_suffix": { "type": "array", "items": { "type": "string" } },
+            "no_space_between_number_and_text": { "type": "boolean", "default": false }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
 }

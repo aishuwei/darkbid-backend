@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>暗标格式专项检查报告 - 技术标用于暗标(1)_批注版.docx</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f5f6fa;
+            color: #2c3e50;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 { font-size: 24px; margin-bottom: 8px; }
+        .header .meta { font-size: 14px; opacity: 0.9; }
+        .header .notice {
+            margin-top: 8px;
+            font-size: 12px;
+            opacity: 0.85;
+            background: rgba(255,255,255,0.15);
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+        .status-card {
+            padding: 25px 30px;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 10px 28px;
+            border-radius: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            color: white;
+            background: #27ae60;
+            margin-bottom: 15px;
+        }
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+        .stat-item { text-align: center; min-width: 80px; }
+        .stat-num { font-size: 28px; font-weight: bold; color: #27ae60; }
+        .stat-label { font-size: 13px; color: #7f8c8d; margin-top: 4px; }
+        .section {
+            padding: 25px 30px;
+            border-bottom: 1px solid #eee;
+        }
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-desc {
+            font-size: 13px;
+            color: #7f8c8d;
+            margin-bottom: 15px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th {
+            background: #f8f9fa;
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: top;
+        }
+        tr:hover { background: #fafbfc; }
+        .current { color: #e74c3c; font-weight: 500; }
+        .required { color: #27ae60; font-weight: 500; }
+        
+        /* 检查清单样式 */
+        .checklist-table tr.passed {
+            border-left: 4px solid #27ae60;
+            background: #f6fff9;
+        }
+        .checklist-table tr.failed {
+            border-left: 4px solid #e74c3c;
+            background: #fff6f6;
+        }
+        .checklist-table tr.disabled {
+            border-left: 4px solid #bdc3c7;
+            background: #fafafa;
+            color: #95a5a6;
+        }
+        .tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .tag-pass { background: #d4edda; color: #155724; }
+        .tag-fail { background: #f8d7da; color: #721c24; }
+        .tag-disabled { background: #e2e3e5; color: #383d41; }
+        .issue-preview {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+            line-height: 1.4;
+        }
+        .issue-preview code {
+            background: #f1f2f6;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+            color: #e74c3c;
+        }
+        
+        /* 【新增】输出文件列表样式 */
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .file-item.disabled {
+            border-left-color: #bdc3c7;
+            opacity: 0.7;
+        }
+        .file-icon { font-size: 24px; }
+        .file-name { font-weight: 600; font-size: 14px; color: #2c3e50; }
+        .file-path { font-size: 12px; color: #7f8c8d; margin-top: 2px; font-family: monospace; }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #27ae60;
+            font-size: 15px;
+            font-weight: 500;
+        }
+        .empty-icon { font-size: 40px; margin-bottom: 10px; }
+        .footer {
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #95a5a6;
+            background: #fafbfc;
+        }
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .header { padding: 20px; }
+            .header h1 { font-size: 20px; }
+            .section { padding: 15px; }
+            th, td { padding: 8px 6px; font-size: 13px; }
+            .stats { gap: 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📐 暗标格式专项检查报告</h1>
+            <div class="meta">技术标用于暗标(1)_批注版.docx &nbsp;|&nbsp; 检查时间: 2026-08-27 14:52:51</div>
+            <div class="notice">ℹ️ 本报告仅包含格式排版检查，未进行 OCR 图片识别与 NER 敏感信息扫描</div>
+        </div>
+
+        <div class="status-card">
+            <div class="status-badge">✅ 检查通过</div>
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-num">0</div>
+                    <div class="stat-label">格式问题</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num">7</div>
+                    <div class="stat-label">检查维度</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num">7</div>
+                    <div class="stat-label">通过项</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num">0</div>
+                    <div class="stat-label">未通过项</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">📋 检查维度清单</div>
+            <p class="section-desc">以下列出本次检查启用的全部维度及结果。灰色项表示在 rules.json 中未启用，不在本次检查范围内。</p>
+            <table class="checklist-table">
+                <thead>
+                    <tr>
+                        <th style="width:160px">检查维度</th>
+                        <th style="width:70px">状态</th>
+                        <th style="width:70px">问题数</th>
+                        <th>说明 / 违规预览</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+            <tr class="passed">
+                <td><strong>纸张大小与页数</strong></td>
+                <td><span class="tag tag-pass">✅ 通过</span></td>
+                <td>0</td>
+                <td>检查文档是否为 A4 纸张，以及页数是否可能超标</td>
+            </tr>
+            
+
+            <tr class="passed">
+                <td><strong>页边距</strong></td>
+                <td><span class="tag tag-pass">✅ 通过</span></td>
+                <td>0</td>
+                <td>检查上/下/左/右边距是否符合暗标要求的固定值</td>
+            </tr>
+            
+
+            <tr class="passed">
+                <td><strong>字体、字号及样式</strong></td>
+                <td><span class="tag tag-pass">✅ 通过</span></td>
+                <td>0</td>
+                <td>检查中文字体、字号、颜色、加粗、倾斜、下划线及字符间空格</td>
+            </tr>
+            
+
+            <tr class="passed">
+                <td><strong>段落格式</strong></td>
+                <td><span class="tag tag-pass">✅ 通过</span></td>
+                <td>0</td>
+                <td>检查对齐方式、行距模式与数值、首行缩进、左右缩进、段前段后间距及空段落</td>
+            </tr>
+            
+
+            <tr class="passed">
+                <td><strong>表格与图片格式</strong></td>
+                <td><span class="tag tag-pass">✅ 通过</span></td>
+                <td>0</td>
+                <td>检查表格整体对齐、表内文字样式、图片居中对齐等</td>
+            </tr>
+            
+
+            <tr class="passed">
+                <td><strong>文档结构</strong></td>
+                <td><span class="tag tag-pass">✅ 通过</span></td>
+                <td>0</td>
+                <td>检查页眉、页脚、页码等是否违规存在</td>
+            </tr>
+            
+
+            <tr class="passed">
+                <td><strong>标点符号规范</strong></td>
+                <td><span class="tag tag-pass">✅ 通过</span></td>
+                <td>0</td>
+                <td>检查是否存在英文标点混用在中文语境中的情况</td>
+            </tr>
+            
+                </tbody>
+            </table>
+        </div>
+
+        
+            <div class="section">
+                <div class="section-title">🔍 问题明细</div>
+                <div class="empty-state">
+                    <div class="empty-icon">🎉</div>
+                    <div>未发现任何格式问题，所有启用检查项均通过！</div>
+                </div>
+            </div>
+            
+
+        
+            <div class="section">
+                <div class="section-title">📁 输出文件</div>
+                <div class="file-list">
+                    <div class="file-item">
+                        <span class="file-icon">📄</span>
+                        <div>
+                            <div class="file-name">HTML 检查报告</div>
+                            <div class="file-path">技术标用于暗标(1)_批注版.docx_格式检查报告.html</div>
+                        </div>
+                    </div>
+                    <div class="file-item">
+                        <span class="file-icon">⏳</span>
+                        <div>
+                            <div class="file-name">批注版 Word</div>
+                            <div class="file-path">正在后台生成中，请稍后查看输出目录...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+
+        <div class="footer">
+            本报告由暗标合规检查系统自动生成（格式专项版）&nbsp;|&nbsp; 仅供参考使用
+        </div>
+    </div>
+</body>
+</html>

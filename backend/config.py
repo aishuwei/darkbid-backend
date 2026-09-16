@@ -13,7 +13,7 @@ OUTPUT_DIR = os.path.join(TMP_DIR, 'output')
 for d in [TMP_DIR, UPLOAD_DIR, OUTPUT_DIR]:
     os.makedirs(d, exist_ok=True)
 
-MAX_FILE_SIZE = 1 * 1024 * 1024  # 1MB
+MAX_FILE_SIZE = 2 * 1024 * 1024  # 1MB
 MAX_PAGES = 800
 MAX_LINES = 2000
 

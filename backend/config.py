@@ -13,11 +13,22 @@ OUTPUT_DIR = os.path.join(TMP_DIR, 'output')
 for d in [TMP_DIR, UPLOAD_DIR, OUTPUT_DIR]:
     os.makedirs(d, exist_ok=True)
 
-MAX_FILE_SIZE = 1 * 1024 * 1024
+MAX_FILE_SIZE = 1 * 1024 * 1024  # 1MB
 MAX_PAGES = 800
 MAX_LINES = 2000
 
-# 200个激活码
+# ============================================================
+# 【永久测试码】可以无限次使用，不消耗
+# ============================================================
+PERMANENT_CODES = [
+    'ZBLS2026',      # 永久测试码
+    'VIP8888',       # 永久测试码
+    'TEST2026',      # 永久测试码
+]
+
+# ============================================================
+# 【普通激活码】一次使用后失效
+# ============================================================
 VALID_CODES = [
     'ZB00K2P9', 'ZB019VO7', 'ZB01A8C3', 'ZB02B1D4', 'ZB03E5F6',
     'ZB04H7J8', 'ZB05NU59', 'ZB06QW12', 'ZB07RT34', 'ZB08XY56',
@@ -44,5 +55,5 @@ VALID_CODES = [
     'ZB85XY12', 'ZB86YZ34', 'ZB87ZA56', 'ZB88AB78', 'ZB89BC90',
     'ZB90CD12', 'ZB91DE34', 'ZB92EF56', 'ZB93FG78', 'ZB94GH90',
     'ZB95HI12', 'ZB96IJ34', 'ZB97JK56', 'ZB98KL78', 'ZB99LM90',
-    'TEST2024', 'DARKBID01', 'VIP8888', 'ZBLS2024'
+    'DARKBID01',
 ]

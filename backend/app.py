@@ -1,5 +1,5 @@
 """
-backend/app.py - Flask后端主入口 (简洁版)
+backend/app.py - Flask后端主入口 (文件持久化版)
 """
 import sys
 import os
@@ -25,8 +25,35 @@ from utils.report_gen import ReportGenerator
 app = Flask(__name__)
 CORS(app)
 
-# --- 内存任务状态 ---
-tasks = {}
+# ============================================================
+# 【修改】任务状态改为文件持久化（解决多实例共享问题）
+# ============================================================
+TASKS_FILE = '/tmp/tasks.json'
+
+
+def load_tasks():
+    """从文件加载任务状态"""
+    if os.path.exists(TASKS_FILE):
+        try:
+            with open(TASKS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f'[任务] 加载失败: {e}')
+            return {}
+    return {}
+
+
+def save_tasks():
+    """保存任务状态到文件"""
+    try:
+        with open(TASKS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(tasks, f, ensure_ascii=False)
+    except Exception as e:
+        print(f'[任务] 保存失败: {e}')
+
+
+tasks = load_tasks()
+print(f'[任务] 已加载 {len(tasks)} 个历史任务')
 
 # --- 激活码管理 ---
 USED_CODES_FILE = '/tmp/used_codes.json'
@@ -67,7 +94,7 @@ def get_output_dir(task_id):
 def validate_document(file_path):
     size = os.path.getsize(file_path)
     if size > MAX_FILE_SIZE:
-        return False, f"文件大小{size/1024/1024:.2f}MB，超过限制1MB"
+        return False, f"文件大小{size/1024/1024:.2f}MB，超过限制{MAX_FILE_SIZE/1024/1024:.0f}MB"
     try:
         from docx import Document
         doc = Document(file_path)
@@ -128,6 +155,7 @@ def upload_requirement_text():
         'requirement_path': req_path,
         'created_at': datetime.now().isoformat()
     }
+    save_tasks()
     return jsonify({'success': True, 'task_id': task_id, 'message': '格式要求已接收'})
 
 @app.route('/api/upload-req-file', methods=['POST'])
@@ -151,6 +179,7 @@ def upload_requirement_file():
         'file_name': file.filename,
         'created_at': datetime.now().isoformat()
     }
+    save_tasks()
     return jsonify({'success': True, 'task_id': task_id, 'message': '文件已接收'})
 
 @app.route('/api/generate-rules', methods=['POST'])
@@ -177,7 +206,7 @@ def generate_rules():
 
     tasks[task_id]['status'] = 'rules_generated'
     tasks[task_id]['rules_path'] = rules_path
-
+    save_tasks()
     return jsonify({'success': True, 'message': '配置已生成', 'task_id': task_id})
 
 @app.route('/api/upload-doc', methods=['POST'])
@@ -199,7 +228,7 @@ def upload_document():
     file.seek(0)
 
     if file_size > MAX_FILE_SIZE:
-        return jsonify({'success': False, 'message': f'文件大小{file_size/1024/1024:.2f}MB，超过限制1MB'}), 400
+        return jsonify({'success': False, 'message': f'文件大小{file_size/1024/1024:.2f}MB，超过限制{MAX_FILE_SIZE/1024/1024:.0f}MB'}), 400
 
     task_dir = get_task_dir(task_id)
     doc_path = os.path.join(task_dir, 'document.docx')
@@ -213,6 +242,7 @@ def upload_document():
     tasks[task_id]['status'] = 'doc_uploaded'
     tasks[task_id]['doc_path'] = doc_path
     tasks[task_id]['doc_name'] = file.filename
+    save_tasks()
 
     return jsonify({'success': True, 'message': '文件上传成功', 'task_id': task_id})
 
@@ -240,6 +270,7 @@ def start_check():
             return jsonify({'success': False, 'message': '找不到规则配置文件'}), 500
 
     tasks[task_id]['status'] = 'checking'
+    save_tasks()
 
     try:
         # 1. 执行检查
@@ -272,6 +303,7 @@ def start_check():
         tasks[task_id]['annotated_path'] = annotated_path
         tasks[task_id]['report_path'] = report_path
         tasks[task_id]['completed_at'] = datetime.now().isoformat()
+        save_tasks()
 
         return jsonify({
             'success': True,
@@ -286,6 +318,7 @@ def start_check():
         tasks[task_id]['status'] = 'failed'
         tasks[task_id]['error'] = str(e)
         tasks[task_id]['traceback'] = traceback.format_exc()
+        save_tasks()
         return jsonify({'success': False, 'message': f'检查失败: {str(e)}'}), 500
 
 @app.route('/api/status/<task_id>', methods=['GET'])
@@ -340,6 +373,6 @@ if __name__ == '__main__':
     print(f" 项目根目录: {PROJECT_ROOT}")
     print(f" 上传目录: {UPLOAD_DIR}")
     print(f" 输出目录: {OUTPUT_DIR}")
-    print(f" 存储模式: 本地临时文件")
+    print(f" 文件大小限制: {MAX_FILE_SIZE/1024/1024:.0f}MB")
     print("=" * 50)
     app.run(host='0.0.0.0', port=5000, debug=False)

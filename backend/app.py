@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-backend/app.py — 追标猎手 · 暗标格式检查后端（微信云托管可用版）
+backend/app.py — 追标猎手 · 暗标格式检查后端（微信云托管修复版）
 架构：
-1. 数据库：云开发数据库（tasks / used_codes 集合），走微信开放接口 /tcb/*
-   云托管内调用免 access_token（留空自动注入）；
-   若失效，配置环境变量 WX_APPID / WX_SECRET 后自动改为自行获取 token。
+1. 数据库：云开发数据库（tasks / used_codes 集合），走微信开放接口 /tcb/*。
+   token 双模式自适应：启动时探测——
+     - injected：免鉴权（不传 access_token，依赖云托管注入）；
+     - self：免鉴权失败时用 WX_APPID/WX_SECRET 自取 token（需配环境变量）。
+   两种模式代码自动切换，无需猜测哪种可用。
 2. 文件：全部存云存储，数据库只存 file_id；容器内仅用临时目录（用完即删），
    任意实例可处理任意任务，天然支持多实例。
 3. 端口：默认监听 80，云托管服务端口需一致（或配环境变量 PORT 覆盖）。
-4. 接口：与原版路径、参数、返回结构完全一致，小程序端无需修改。
+4. 接口：路径、参数、返回结构与原版完全一致，小程序端无需修改。
+5. 失败时响应带 detail 字段（微信接口真实 errcode/errmsg），前端可直接看到根因。
 """
 import os
 import sys
@@ -17,9 +20,16 @@ import time
 import uuid
 import shutil
 import tempfile
+import logging
 import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
+
+# --- 强制日志实时输出（gunicorn 下 print 会被缓冲，必须行缓冲）---
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True,
+                    format='%(message)s')
 # --- 项目路径 ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -28,34 +38,64 @@ from backend.config import MAX_FILE_SIZE, MAX_PAGES, VALID_CODES, PERMANENT_CODE
 from core.format_checker import FormatChecker
 from utils.annotator import DocumentAnnotator
 from utils.report_gen import ReportGenerator
+
 # ============================================================
 # 云开发配置
 # ============================================================
 ENV_ID = os.environ.get('TCB_ENV', 'darkbid-d8gxpsbued4a2867')  # 云托管所在的环境ID
 WX_API = 'https://api.weixin.qq.com'
-APPID = os.environ.get('WX_APPID', '')    # 可选：免鉴权失效时才需要
-SECRET = os.environ.get('WX_SECRET', '')  # 可选：同上
+APPID = os.environ.get('WX_APPID', '')  # 免鉴权失效时需要
+SECRET = os.environ.get('WX_SECRET', '')  # 同上
+logging.info(f'[boot] ENV_ID={ENV_ID}')
+logging.info(f'[boot] WX_APPID={"已配置" if APPID else "未配置"}')
+logging.info(f'[boot] WX_SECRET={"已配置" if SECRET else "未配置"}')
 app = Flask(__name__)
 try:
     from flask_cors import CORS
+
     CORS(app)
 except ImportError:
     pass  # callContainer 不依赖 CORS，装不装都能跑
+
+
 class DbError(Exception):
     """云数据库访问失败"""
+
+
+# 最近一次微信接口失败详情（供日志与响应 detail 透传）
+_last_wx_error = {'path': '', 'errcode': None, 'errmsg': ''}
+
+
+def _wx_detail():
+    if _last_wx_error['errcode'] is None:
+        return ''
+    return f"{_last_wx_error['path']} errcode={_last_wx_error['errcode']} errmsg={_last_wx_error['errmsg']}"
+
+
 @app.errorhandler(DbError)
 def handle_db_error(e):
-    print(f'[db] 全局异常: {e}')
-    return jsonify({'success': False, 'message': '云数据库暂不可用，请稍后重试'}), 500
+    logging.error(f'[db] 全局异常: {e}; {_wx_detail()}')
+    return jsonify({'success': False, 'message': '云数据库暂不可用，请稍后重试',
+                    'detail': _wx_detail()}), 500
+
+
 # ============================================================
-# 微信开放接口调用（access_token 管理）
+# 微信开放接口调用（token 双模式自适应）
 # ============================================================
-_token_cache = {'token': '', 'expire_at': 0}
+_token_cache = {'token': '', 'expire_at': 0, 'fail_until': 0}
+CALL_MODE = 'unknown'  # injected / self
+# 只有这些 errcode 才代表"鉴权失败"；-502005（集合不存在）说明鉴权已通过，不算鉴权问题
+TOKEN_ERRCODES = {40001, 40013, 40014, 40125, 41001, 42001}
+
+
 def get_access_token():
-    """有 AppID/Secret 则自取并缓存；否则返回空串（云托管内由网关自动注入）"""
+    """有 AppID/Secret 则自取并缓存（带失败负缓存）；否则返回空串"""
     if not APPID or not SECRET:
         return ''
-    if _token_cache['token'] and time.time() < _token_cache['expire_at']:
+    now = time.time()
+    if now < _token_cache['fail_until']:
+        return _token_cache['token']
+    if _token_cache['token'] and now < _token_cache['expire_at']:
         return _token_cache['token']
     try:
         r = requests.get(f'{WX_API}/cgi-bin/token', params={
@@ -63,28 +103,76 @@ def get_access_token():
             'appid': APPID, 'secret': SECRET,
         }, timeout=10).json()
     except Exception as e:
-        print(f'[token] 获取失败: {e}')
+        logging.error(f'[token] 获取失败: {e}')
+        _token_cache['fail_until'] = now + 60
         return ''
     if 'access_token' not in r:
-        print(f'[token] 接口返回异常: {r}')
+        # 常见：40125=secret错误 40164=IP白名单拦截 40013=appid错误
+        logging.error(f'[token] 接口返回异常: {r}')
+        _token_cache['fail_until'] = now + 60
         return ''
     _token_cache['token'] = r['access_token']
-    _token_cache['expire_at'] = time.time() + r.get('expires_in', 7200) - 300
+    _token_cache['expire_at'] = now + r.get('expires_in', 7200) - 300
     return _token_cache['token']
-def call_wx_api(path, payload):
-    """POST 微信开放接口（/tcb/* 系列），失败返回 None"""
+
+
+def _wx_post(path, payload, mode):
+    """按指定模式 POST 微信接口，永远返回 dict（异常也包装成 errcode=-1）"""
+    params = {}
+    if mode == 'self':
+        t = get_access_token()
+        if not t:
+            return {'errcode': -2, 'errmsg': '获取 access_token 失败（核对 WX_APPID/WX_SECRET；40164=IP白名单拦截）'}
+        params['access_token'] = t
+    # mode == 'injected'：完全不传 access_token 参数
     try:
-        resp = requests.post(f'{WX_API}{path}',
-                             params={'access_token': get_access_token()},
-                             json=payload, timeout=15)
-        result = resp.json()
+        return requests.post(f'{WX_API}{path}', params=params,
+                             json=payload, timeout=15).json()
     except Exception as e:
-        print(f'[wxapi] {path} 请求异常: {e}')
-        return None
+        return {'errcode': -1, 'errmsg': f'request error: {e}'}
+
+
+def call_wx_api(path, payload):
+    """POST 微信开放接口（/tcb/* 系列），失败返回 None 并记录 errcode"""
+    mode = CALL_MODE if CALL_MODE in ('injected', 'self') else 'injected'
+    result = _wx_post(path, payload, mode)
+    logging.info(f'[wxapi] {path} mode={mode} 返回: {str(result)[:500]}')
     if result.get('errcode', 0) != 0:
-        print(f'[wxapi] {path} 失败: {result}')
+        _last_wx_error.update(path=path, errcode=result.get('errcode'),
+                              errmsg=str(result.get('errmsg'))[:200])
+        logging.error(f'[wxapi] {path} 失败: {_wx_detail()}')
         return None
     return result
+
+
+def detect_token_mode():
+    """启动探测：免鉴权优先，失败回退 appid/secret 自取。只探测一次。"""
+    global CALL_MODE
+    payload = {'env': ENV_ID,
+               'query': 'db.collection("tasks").limit(1).get()'}
+    r = _wx_post('/tcb/databasequery', payload, mode='injected')
+    if r.get('errcode') not in TOKEN_ERRCODES:
+        CALL_MODE = 'injected'
+        logging.info(f'[boot] 探测结果：免鉴权生效 errcode={r.get("errcode")}')
+        return
+    logging.info(f'[boot] 免鉴权探测未通过: {r}')
+    if not (APPID and SECRET):
+        logging.error('[boot] 未配置 WX_APPID/WX_SECRET，无法回退自取 token 模式；'
+                      '若免鉴权确不可用，请在「服务设置→环境变量」配置后重新部署')
+        CALL_MODE = 'injected'
+        return
+    r = _wx_post('/tcb/databasequery', payload, mode='self')
+    if r.get('errcode') not in TOKEN_ERRCODES:
+        CALL_MODE = 'self'
+        logging.info(f'[boot] 探测结果：appid/secret 自取 token 生效 errcode={r.get("errcode")}')
+        return
+    logging.error(f'[boot] 两种模式鉴权均失败，自取模式返回: {r}')
+    CALL_MODE = 'injected'
+
+
+detect_token_mode()
+
+
 # ============================================================
 # 云数据库操作（/tcb/database* 系列）
 # 注意：databasequery 返回的 data 是 JSON 字符串数组
@@ -93,6 +181,8 @@ def db_add(collection, doc):
     query = 'db.collection("%s").add({data: %s})' % (
         collection, json.dumps(doc, ensure_ascii=False))
     return call_wx_api('/tcb/databaseadd', {'env': ENV_ID, 'query': query})
+
+
 def db_query_one(collection, field, value):
     query = 'db.collection("%s").where({%s: %s}).limit(1).get()' % (
         collection, field, json.dumps(str(value), ensure_ascii=False))
@@ -101,6 +191,8 @@ def db_query_one(collection, field, value):
         raise DbError(f'查询 {collection} 失败')
     data = r.get('data') or []
     return json.loads(data[0]) if data else None
+
+
 def db_update_where(collection, field, value, data):
     query = 'db.collection("%s").where({%s: %s}).update({data: %s})' % (
         collection, field, json.dumps(str(value), ensure_ascii=False),
@@ -109,6 +201,8 @@ def db_update_where(collection, field, value, data):
     if r is None:
         raise DbError(f'更新 {collection} 失败')
     return True
+
+
 # ============================================================
 # 云存储操作（/tcb/uploadfile + /tcb/batchdownloadfile）
 # ============================================================
@@ -116,7 +210,7 @@ def storage_upload(local_path, cloud_path):
     """上传本地文件到云存储，成功返回 file_id（cloud://...）"""
     r = call_wx_api('/tcb/uploadfile', {'env': ENV_ID, 'path': cloud_path})
     if not r or 'url' not in r:
-        print(f'[storage] 获取上传凭证失败: {r}')
+        logging.error(f'[storage] 获取上传凭证失败: {r}; {_wx_detail()}')
         return None
     try:
         with open(local_path, 'rb') as f:
@@ -126,14 +220,16 @@ def storage_upload(local_path, cloud_path):
                 'x-cos-meta-fileid': r.get('cos_file_id', ''),
             }, timeout=120)
     except Exception as e:
-        print(f'[storage] 上传异常: {e}')
+        logging.error(f'[storage] 上传异常: {e}')
         return None
     if resp.status_code in (200, 204):
         file_id = r.get('fileid')
-        print(f'[storage] 上传成功: {file_id}')
+        logging.info(f'[storage] 上传成功: {file_id}')
         return file_id
-    print(f'[storage] 上传失败 HTTP {resp.status_code}: {resp.text[:200]}')
+    logging.error(f'[storage] 上传失败 HTTP {resp.status_code}: {resp.text[:200]}')
     return None
+
+
 def _get_download_url(file_id):
     r = call_wx_api('/tcb/batchdownloadfile',
                     {'env': ENV_ID, 'fileid_list': [file_id]})
@@ -141,8 +237,10 @@ def _get_download_url(file_id):
         item = r['file_list'][0]
         if item.get('status') == 0:
             return item.get('download_url')
-    print(f'[storage] 获取下载链接失败: {r}')
+    logging.error(f'[storage] 获取下载链接失败: {r}; {_wx_detail()}')
     return None
+
+
 def storage_download(file_id, local_path):
     """从云存储下载文件到本地路径"""
     url = _get_download_url(file_id)
@@ -155,35 +253,49 @@ def storage_download(file_id, local_path):
                 f.write(resp.content)
             return True
     except Exception as e:
-        print(f'[storage] 下载异常: {e}')
+        logging.error(f'[storage] 下载异常: {e}')
     return False
+
+
 # ============================================================
-# 任务 / 激活码 业务封装（全部落库，不再依赖容器本地路径）
+# 任务 / 激活码 业务封装（全部落库，不依赖容器本地路径）
 # ============================================================
 def generate_task_id():
     return 'task_' + str(int(time.time())) + '_' + uuid.uuid4().hex[:8]
+
+
 def create_task(task_id, data):
     doc = dict(data)
     doc['task_id'] = task_id
     doc['created_at'] = datetime.now().isoformat()
     return db_add('tasks', doc) is not None
+
+
 def get_task(task_id):
     return db_query_one('tasks', 'task_id', task_id)
+
+
 def update_task(task_id, data):
     data['updated_at'] = datetime.now().isoformat()
     return db_update_where('tasks', 'task_id', task_id, data)
+
+
 def is_code_used(code):
     return db_query_one('used_codes', 'code', code) is not None
+
+
 def mark_code_used(code):
     return db_add('used_codes', {'code': code,
                                  'used_at': datetime.now().isoformat()}) is not None
+
+
 # ============================================================
 # 工具函数
 # ============================================================
 def validate_document(file_path):
     size = os.path.getsize(file_path)
     if size > MAX_FILE_SIZE:
-        return False, f"文件大小{size/1024/1024:.2f}MB，超过限制{MAX_FILE_SIZE/1024/1024:.0f}MB"
+        return False, f"文件大小{size / 1024 / 1024:.2f}MB，超过限制{MAX_FILE_SIZE / 1024 / 1024:.0f}MB"
     try:
         from docx import Document
         doc = Document(file_path)
@@ -194,6 +306,8 @@ def validate_document(file_path):
     except Exception as e:
         return False, f"文件解析失败: {str(e)}"
     return True, "校验通过"
+
+
 def extract_text(path):
     """读取要求文件文本（.txt/.md 直接读，.docx 提取段落）"""
     ext = os.path.splitext(path)[1].lower()
@@ -208,11 +322,14 @@ def extract_text(path):
             continue
     with open(path, 'r', encoding='utf-8', errors='ignore') as f:
         return f.read()
+
+
 # ============================================================
 # API 接口
 # ============================================================
 @app.route('/api/health', methods=['GET'])
 def health_check():
+    # 探活专用：无论 DB 状态一律 200，避免 DB 抖动引发容器被杀
     db_ok = False
     try:
         r = call_wx_api('/tcb/databasequery',
@@ -221,7 +338,22 @@ def health_check():
     except Exception:
         pass
     return jsonify({'status': 'ok', 'message': '服务运行中',
-                    'env': ENV_ID, 'db_ok': db_ok})
+                    'env': ENV_ID, 'db_ok': db_ok, 'call_mode': CALL_MODE})
+
+
+@app.route('/api/db-check', methods=['GET'])  # 排障专用，问题解决后删除
+def db_check():
+    info = {'env': ENV_ID, 'call_mode': CALL_MODE,
+            'token_mode': 'appid/secret' if (APPID and SECRET) else '云托管免鉴权'}
+    for coll in ('tasks', 'used_codes'):
+        r = call_wx_api('/tcb/databasequery',
+                        {'env': ENV_ID,
+                         'query': f'db.collection("{coll}").limit(1).get()'})
+        info[f'{coll}_ok'] = r is not None
+    info['last_error'] = dict(_last_wx_error)
+    return jsonify(info)
+
+
 @app.route('/api/verify', methods=['POST'])
 def verify_code():
     data = request.get_json(silent=True) or {}
@@ -235,8 +367,11 @@ def verify_code():
     if is_code_used(code):
         return jsonify({'success': False, 'message': '激活码已被使用'}), 401
     if not mark_code_used(code):
-        return jsonify({'success': False, 'message': '激活码核销失败，请重试'}), 500
+        return jsonify({'success': False, 'message': '激活码核销失败，请重试',
+                        'detail': _wx_detail()}), 500
     return jsonify({'success': True, 'message': '验证成功', 'permanent': False})
+
+
 @app.route('/api/upload-req-text', methods=['POST'])
 def upload_requirement_text():
     data = request.get_json(silent=True) or {}
@@ -250,9 +385,13 @@ def upload_requirement_text():
     if not create_task(task_id, {'status': 'req_uploaded',
                                  'requirement_type': 'text',
                                  'requirement_text': text}):
-        return jsonify({'success': False, 'message': '任务创建失败（数据库不可用）'}), 500
-    print(f'[task] 文本任务创建成功: {task_id}')
+        logging.error(f'[task] 任务创建失败: {task_id}; {_wx_detail()}')
+        return jsonify({'success': False, 'message': '任务创建失败（数据库不可用）',
+                        'detail': _wx_detail()}), 500
+    logging.info(f'[task] 文本任务创建成功: {task_id}')
     return jsonify({'success': True, 'task_id': task_id, 'message': '格式要求已接收'})
+
+
 @app.route('/api/upload-req-file', methods=['POST'])
 def upload_requirement_file():
     if 'file' not in request.files:
@@ -268,16 +407,20 @@ def upload_requirement_file():
         file.save(tmp_path)
         file_id = storage_upload(tmp_path, f'{task_id}/requirement{ext}')
         if not file_id:
-            return jsonify({'success': False, 'message': '要求文件保存失败（云存储不可用）'}), 500
+            return jsonify({'success': False, 'message': '要求文件保存失败（云存储不可用）',
+                            'detail': _wx_detail()}), 500
         if not create_task(task_id, {'status': 'req_uploaded',
                                      'requirement_type': 'file',
                                      'req_file_id': file_id,
                                      'file_name': file.filename}):
-            return jsonify({'success': False, 'message': '任务创建失败（数据库不可用）'}), 500
-        print(f'[task] 文件任务创建成功: {task_id}')
+            return jsonify({'success': False, 'message': '任务创建失败（数据库不可用）',
+                            'detail': _wx_detail()}), 500
+        logging.info(f'[task] 文件任务创建成功: {task_id}')
         return jsonify({'success': True, 'task_id': task_id, 'message': '文件已接收'})
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @app.route('/api/generate-rules', methods=['POST'])
 def generate_rules():
     data = request.get_json(silent=True) or {}
@@ -306,7 +449,7 @@ def generate_rules():
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
     # --- 解析要求生成规则 ---
-    # TODO: 在这里接入真正的「要求文本 → 规则」解析逻辑，替换下面的模拟规则
+    # TODO: 接入真正的「要求文本 → 规则」解析逻辑，替换下面的模拟规则
     rules = {
         'document_info': {
             'name': '模拟规则',
@@ -317,9 +460,12 @@ def generate_rules():
     rules_json = json.dumps(rules, ensure_ascii=False, indent=2)
     # 规则 JSON 直接存数据库字段（start-check 时再落成临时文件供 FormatChecker 使用）
     if not update_task(task_id, {'status': 'rules_generated', 'rules_json': rules_json}):
-        return jsonify({'success': False, 'message': '规则保存失败'}), 500
-    print(f'[task] 规则生成成功: {task_id}')
+        return jsonify({'success': False, 'message': '规则保存失败',
+                        'detail': _wx_detail()}), 500
+    logging.info(f'[task] 规则生成成功: {task_id}')
     return jsonify({'success': True, 'message': '配置已生成', 'task_id': task_id})
+
+
 @app.route('/api/upload-doc', methods=['POST'])
 def upload_document():
     task_id = request.form.get('taskId') or request.form.get('task_id')
@@ -342,8 +488,8 @@ def upload_document():
         return jsonify({'success': False, 'message': '文件为空'}), 400
     if file_size > MAX_FILE_SIZE:
         return jsonify({'success': False,
-                        'message': f"文件大小{file_size/1024/1024:.2f}MB，"
-                                   f"超过限制{MAX_FILE_SIZE/1024/1024:.0f}MB"}), 400
+                        'message': f"文件大小{file_size / 1024 / 1024:.2f}MB，"
+                                   f"超过限制{MAX_FILE_SIZE / 1024 / 1024:.0f}MB"}), 400
     tmp_dir = tempfile.mkdtemp(prefix='doc_')
     try:
         doc_path = os.path.join(tmp_dir, 'document.docx')
@@ -354,15 +500,19 @@ def upload_document():
         # 校验通过 → 存云存储，数据库记 file_id
         file_id = storage_upload(doc_path, f'{task_id}/document.docx')
         if not file_id:
-            return jsonify({'success': False, 'message': '文件保存失败（云存储不可用）'}), 500
+            return jsonify({'success': False, 'message': '文件保存失败（云存储不可用）',
+                            'detail': _wx_detail()}), 500
         if not update_task(task_id, {'status': 'doc_uploaded',
                                      'doc_file_id': file_id,
                                      'doc_name': file.filename}):
-            return jsonify({'success': False, 'message': '任务更新失败'}), 500
-        print(f'[task] 文档上传成功: {task_id}')
+            return jsonify({'success': False, 'message': '任务更新失败',
+                            'detail': _wx_detail()}), 500
+        logging.info(f'[task] 文档上传成功: {task_id}')
         return jsonify({'success': True, 'message': '文件上传成功', 'task_id': task_id})
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @app.route('/api/start-check', methods=['POST'])
 def start_check():
     data = request.get_json(silent=True) or {}
@@ -422,17 +572,20 @@ def start_check():
             'annotated_file_id': annotated_file_id,
             'completed_at': datetime.now().isoformat(),
         })
-        print(f'[task] 检查完成: {task_id}, 问题数: {len(format_issues)}')
+        logging.info(f'[task] 检查完成: {task_id}, 问题数: {len(format_issues)}')
         return jsonify({'success': True, 'message': '检查完成', 'task_id': task_id,
                         'issue_count': len(format_issues),
                         'passed': len(format_issues) == 0})
     except Exception as e:
         import traceback
+        logging.error(f'[task] 检查异常: {task_id}\n{traceback.format_exc()}')
         update_task(task_id, {'status': 'failed', 'error': str(e),
                               'traceback': traceback.format_exc()[:2000]})
         return jsonify({'success': False, 'message': f'检查失败: {str(e)}'}), 500
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @app.route('/api/status/<task_id>', methods=['GET'])
 def get_status(task_id):
     task = get_task(task_id)
@@ -441,6 +594,8 @@ def get_status(task_id):
     return jsonify({'success': True, 'task_id': task_id,
                     'status': task.get('status'),
                     'issue_count': task.get('issue_count', 0)})
+
+
 @app.route('/api/download/<task_id>/<file_type>', methods=['GET'])
 def download_result(task_id, file_type):
     task = get_task(task_id)
@@ -458,15 +613,18 @@ def download_result(task_id, file_type):
         return jsonify({'success': False, 'message': '文件不存在'}), 404
     url = _get_download_url(file_id)
     if not url:
-        return jsonify({'success': False, 'message': '获取下载链接失败'}), 500
+        return jsonify({'success': False, 'message': '获取下载链接失败',
+                        'detail': _wx_detail()}), 500
     return jsonify({'success': True, 'download_url': url, 'file_name': file_name})
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 80))
-    print('=' * 50)
-    print(' 追标猎手 - 暗标格式检查后端服务（云托管版）')
-    print('=' * 50)
-    print(f' 云开发环境: {ENV_ID}')
-    print(f' 监听端口: {port}（云托管服务端口需与此一致）')
-    print(f' access_token 模式: {"自行获取" if APPID and SECRET else "云托管免鉴权"}')
-    print('=' * 50)
+    logging.info('=' * 50)
+    logging.info(' 追标猎手 - 暗标格式检查后端服务（云托管修复版）')
+    logging.info('=' * 50)
+    logging.info(f' 云开发环境: {ENV_ID}')
+    logging.info(f' 监听端口: {port}（云托管服务端口需与此一致）')
+    logging.info(f' access_token 模式: {CALL_MODE}（injected=免鉴权 self=自取）')
+    logging.info('=' * 50)
     app.run(host='0.0.0.0', port=port, debug=False)

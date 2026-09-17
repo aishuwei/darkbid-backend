@@ -16,6 +16,6 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com
 COPY . .
 RUN mkdir -p /app/backend/tmp/uploads /app/backend/tmp/output
 
-EXPOSE 5000
+EXPOSE 80
 
 CMD ["gunicorn", "-b", "0.0.0.0:80", "-w", "2", "--timeout", "120", "backend.app:app"]

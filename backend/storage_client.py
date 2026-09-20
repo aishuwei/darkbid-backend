@@ -49,7 +49,7 @@ class StorageClient:
             headers={
                 "Authorization": item["authorization"],
                 "X-Cos-Security-Token": item["token"],
-                "X-Cos-Meta-Fileid": item["cloudMeta"],
+                "X-Cos-Meta-Fileid": item["cloudObjectMeta"],
             },
             timeout=120,
         )

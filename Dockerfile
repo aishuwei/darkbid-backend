@@ -18,4 +18,4 @@ RUN mkdir -p /app/backend/tmp/uploads /app/backend/tmp/output
 
 EXPOSE 80
 
-CMD ["gunicorn", "-b", "0.0.0.0:${PORT:-80}", "-w", "2", "--timeout", "120", "backend.app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:80", "-w", "2", "--timeout", "120", "backend.app:app"]

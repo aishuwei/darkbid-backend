@@ -122,7 +122,7 @@ def get_client():
         return _client
     env_id = os.environ.get("TCB_ENV")
     api_key = os.environ.get("CLOUDBASE_APIKEY")
-    instance_id = os.environ.get("NOSQL_INSTANCE_ID", "(default)")
+    instance_id = "(default)"
     if not env_id:
         raise RuntimeError("缺少环境变量 TCB_ENV")
     if not api_key:

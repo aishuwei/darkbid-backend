@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-backend/app.py — 追标猎手 · 暗标格式检查后端（云托管直连版）
+backend/app.py — 追标猎手 · 暗标格式检查后端（云托管直连版 · 异步检查）
 架构：CloudRun (Container / Python) → NoSQL HTTP API + COS Storage
 """
 import os
@@ -8,6 +8,7 @@ import sys
 import json
 import time
 import uuid
+import threading
 import tempfile
 import shutil
 import logging
@@ -367,26 +368,20 @@ def upload_document():
 
 
 # ============================================================
-# API: 开始检查
+# 后台线程：执行真正的检查逻辑
 # ============================================================
-@app.route('/api/start-check', methods=['POST'])
-def start_check():
-    data = request.get_json(silent=True) or {}
-    task_id = data.get('taskId') or data.get('task_id')
-    if not task_id:
-        return jsonify({'success': False, 'message': '缺少任务ID'}), 400
+def _run_check_async(task_id):
+    """后台线程执行检查、批注、报告生成，结果写回数据库"""
     task = get_task(task_id)
     if not task:
-        return jsonify({'success': False, 'message': '任务不存在'}), 404
-    if task.get('status') != 'doc_uploaded':
-        return jsonify({'success': False,
-                        'message': f'任务状态异常（当前 {task.get("status")}，需 doc_uploaded）'}), 400
+        logging.error(f'[check-async] 任务不存在: {task_id}')
+        return
 
     doc_file_id = task.get('doc_file_id')
     if not doc_file_id:
-        return jsonify({'success': False, 'message': '技术文件 fileid 缺失'}), 400
+        update_task(task_id, {'status': 'failed', 'error': 'fileid 缺失'})
+        return
 
-    update_task(task_id, {'status': 'checking'})
     tmp_dir = _make_tmp_dir('chk_')
     try:
         storage = get_storage_client()
@@ -396,13 +391,13 @@ def start_check():
         doc_local = os.path.join(tmp_dir, doc_name)
         download_url = storage.get_download_url(doc_file_id, expires=600)
         if not download_url:
-            update_task(task_id, {'status': 'doc_uploaded'})
-            return jsonify({'success': False, 'message': '获取文档下载链接失败'}), 500
+            update_task(task_id, {'status': 'failed', 'error': '获取下载链接失败'})
+            return
         import requests as _rq
         r = _rq.get(download_url, timeout=120)
         if r.status_code != 200:
-            update_task(task_id, {'status': 'doc_uploaded'})
-            return jsonify({'success': False, 'message': '文档下载失败'}), 500
+            update_task(task_id, {'status': 'failed', 'error': '文档下载失败'})
+            return
         with open(doc_local, 'wb') as f:
             f.write(r.content)
 
@@ -414,8 +409,8 @@ def start_check():
                 f.write(rules_json)
         else:
             if not os.path.exists(DEFAULT_RULES_PATH):
-                update_task(task_id, {'status': 'doc_uploaded'})
-                return jsonify({'success': False, 'message': '找不到规则文件'}), 500
+                update_task(task_id, {'status': 'failed', 'error': '找不到规则文件'})
+                return
             rules_path = DEFAULT_RULES_PATH
 
         # 3. 执行检查
@@ -448,9 +443,8 @@ def start_check():
         report_file_id = storage.upload(report_path, report_cloud)
         annotated_file_id = storage.upload(annotated_path, annotated_cloud)
         if not report_file_id or not annotated_file_id:
-            update_task(task_id, {'status': 'failed',
-                                  'error': '结果文件上传失败'})
-            return jsonify({'success': False, 'message': '结果文件上传失败'}), 500
+            update_task(task_id, {'status': 'failed', 'error': '结果文件上传失败'})
+            return
 
         # 7. 更新任务
         update_task(task_id, {
@@ -461,16 +455,47 @@ def start_check():
             'checked_at': datetime.now().isoformat(),
         })
         logging.info(f'[task] 检查完成: {task_id}, 问题数: {len(format_issues)}')
-        return jsonify({'success': True, 'task_id': task_id,
-                        'issue_count': len(format_issues),
-                        'passed': len(format_issues) == 0,
-                        'message': '检查完成'})
     except Exception as e:
-        logging.exception(f'[check] 检查异常: {task_id}')
+        logging.exception(f'[check-async] 检查异常: {task_id}')
         update_task(task_id, {'status': 'failed', 'error': str(e)})
-        return jsonify({'success': False, 'message': f'检查失败: {str(e)}'}), 500
     finally:
         _cleanup_tmp(tmp_dir)
+
+
+# ============================================================
+# API: 开始检查（立即返回，后台执行）
+# ============================================================
+@app.route('/api/start-check', methods=['POST'])
+def start_check():
+    data = request.get_json(silent=True) or {}
+    task_id = data.get('taskId') or data.get('task_id')
+    if not task_id:
+        return jsonify({'success': False, 'message': '缺少任务ID'}), 400
+    task = get_task(task_id)
+    if not task:
+        return jsonify({'success': False, 'message': '任务不存在'}), 404
+    if task.get('status') != 'doc_uploaded':
+        return jsonify({'success': False,
+                        'message': f'任务状态异常（当前 {task.get("status")}，需 doc_uploaded）'}), 400
+
+    doc_file_id = task.get('doc_file_id')
+    if not doc_file_id:
+        return jsonify({'success': False, 'message': '技术文件 fileid 缺失'}), 400
+
+    # 立即更新状态为 checking
+    update_task(task_id, {'status': 'checking'})
+
+    # 启动后台线程
+    t = threading.Thread(target=_run_check_async, args=(task_id,), daemon=True)
+    t.start()
+
+    logging.info(f'[task] 检查任务已启动: {task_id}')
+    return jsonify({
+        'success': True,
+        'task_id': task_id,
+        'status': 'checking',
+        'message': '检查已开始，请轮询状态'
+    })
 
 
 # ============================================================
@@ -487,6 +512,7 @@ def get_status(task_id):
         'status': task.get('status'),
         'issue_count': task.get('issue_count', 0),
         'file_name': task.get('file_name') or task.get('doc_file_name'),
+        'error': task.get('error'),
         'created_at': task.get('created_at'),
         'updated_at': task.get('updated_at'),
     })
@@ -527,7 +553,7 @@ def download_result(task_id, file_type):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 80))
     logging.info('=' * 50)
-    logging.info('  追标猎手 - 后端服务（云托管直连版）')
+    logging.info('  追标猎手 - 后端服务（异步检查版）')
     logging.info('=' * 50)
     logging.info(f'  环境:{ENV_ID}  端口:{port}')
     logging.info('=' * 50)

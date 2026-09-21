@@ -1,28 +1,28 @@
 {
   "document_info": {
     "name": null,
-    "description": "技术文件暗标编制要求：A4纸张，黑色文字图表，标题及正文宋体四号常规字，图内字体字号不限，禁止加粗加色倾斜下划线；上边距2.5cm其余2cm，左对齐，首行缩进2字符，固定值30磅行距，无空格无空行，无页眉页脚页码，无封面目录，总页数≤300页，不得出现身份识别信息。",
-    "generated_date": "2026-08-28"
+    "description": "贵州省工程建设招标投标暗标评审格式要求（黔发改法规〔2026〕196号）",
+    "generated_date": "2026-07-16"
   },
   "page_check": {
     "enabled": true,
-    "description": "A4纸张大小，总页数不得超过300页。",
+    "description": "统一采用A4纸张，文字、图表颜色均设置为黑色，总页数不得超过800页",
     "paper_size": "A4",
-    "max_pages": 300,
+    "max_pages": 800,
     "no_blank_pages": null
   },
   "margin_check": {
     "enabled": true,
-    "description": "上边距2.5厘米，其余（下、左、右）均为2厘米。",
-    "top_cm": 2.5,
-    "bottom_cm": 2.0,
-    "left_cm": 2.0,
-    "right_cm": 2.0,
+    "description": "上边距2.0厘米，其余（下、左、右）均为2.5厘米",
+    "top_cm": 2.0,
+    "bottom_cm": 2.5,
+    "left_cm": 2.5,
+    "right_cm": 2.5,
     "tolerance_cm": 0.1
   },
   "font_check": {
     "enabled": true,
-    "description": "标题及正文部分所用文字均采用宋体四号常规字；图、表内字体字号不作要求；所有字体均不得出现加粗、加色、倾斜、下划线等标记，颜色黑色。",
+    "description": "标题及正文部分所有文字均采用宋体四号常规字体，黑色，禁止加粗/加色/倾斜/下划线",
     "chinese_font": "宋体",
     "size_pt": 14,
     "color_hex": "000000",
@@ -33,10 +33,10 @@
   },
   "paragraph_check": {
     "enabled": true,
-    "description": "正文行间距为固定值30磅，左对齐，首行缩进2字符，不得有空格，段落前后不设置空行。",
+    "description": "左对齐，首行缩进2字符，固定值25磅行距，段前段后间距为0，不得有空格",
     "alignment": "left",
     "line_spacing_rule": "exact",
-    "line_spacing_pt": 30,
+    "line_spacing_pt": 25,
     "line_spacing_tolerance_pt": 0.5,
     "first_line_indent_chars": 2,
     "first_line_indent_tolerance_chars": 0.3,
@@ -50,7 +50,7 @@
   },
   "structure_check": {
     "enabled": true,
-    "description": "不做封面和目录，不得设置页眉、页脚和页码。",
+    "description": "封面后即为正文，不得设置目录、内封面及空白页；不编页码，不设页眉、页脚",
     "allow_toc": false,
     "allow_header": false,
     "allow_footer": false,
@@ -58,63 +58,67 @@
     "allow_cover": false
   },
   "table_check": {
-    "enabled": false,
-    "description": null,
+    "enabled": true,
+    "description": "图表内文字采用宋体常规五号字体，黑色，禁止加粗/加色/倾斜/下划线",
     "table_alignment": null,
     "table_text_alignment": null,
     "table_indent_none": null,
     "table_spacing_none": null,
-    "table_font_family": null,
-    "table_font_size_pt": null,
-    "table_font_color_hex": null,
-    "table_allow_bold": null,
-    "table_allow_italic": null,
-    "table_allow_underline": null,
-    "table_allow_color_change": null
+    "table_font_family": "宋体",
+    "table_font_size_pt": 10.5,
+    "table_font_color_hex": "000000",
+    "table_allow_bold": false,
+    "table_allow_italic": false,
+    "table_allow_underline": false,
+    "table_allow_color_change": false
   },
   "heading_check": {
-    "enabled": false,
-    "description": null,
+    "enabled": true,
+    "description": "正文标题序号按阿拉伯数字分级编排：一级为1、2、3……；二级为1.1、1.2……；三级为1.1.1、1.1.2……",
     "identification": {
       "method": "regex",
-      "patterns": {},
+      "patterns": {
+        "level_1": "^\\d+[、\\.]?",
+        "level_2": "^\\d+\\.\\d+[、\\.]?",
+        "level_3": "^\\d+\\.\\d+\\.\\d+[、\\.]?"
+      },
       "style_mapping": null
     },
     "level_rules": {
       "level_1": {
-        "enabled": false,
-        "chinese_font": null,
-        "size_pt": null,
-        "color_hex": null,
-        "allow_bold": null,
-        "allow_italic": null,
-        "allow_underline": null,
-        "allow_color_change": null,
-        "alignment": null,
+        "enabled": true,
+        "chinese_font": "宋体",
+        "size_pt": 14,
+        "color_hex": "000000",
+        "allow_bold": false,
+        "allow_italic": false,
+        "allow_underline": false,
+        "allow_color_change": false,
+        "alignment": "left",
         "number_format": null
       },
       "level_2": {
-        "enabled": false,
-        "chinese_font": null,
-        "size_pt": null,
-        "color_hex": null,
-        "allow_bold": null,
-        "allow_italic": null,
-        "allow_underline": null,
-        "allow_color_change": null,
-        "alignment": null,
+        "enabled": true,
+        "chinese_font": "宋体",
+        "size_pt": 14,
+        "color_hex": "000000",
+        "allow_bold": false,
+        "allow_italic": false,
+        "allow_underline": false,
+        "allow_color_change": false,
+        "alignment": "left",
         "number_format": null
       },
       "level_3": {
-        "enabled": false,
-        "chinese_font": null,
-        "size_pt": null,
-        "color_hex": null,
-        "allow_bold": null,
-        "allow_italic": null,
-        "allow_underline": null,
-        "allow_color_change": null,
-        "alignment": null,
+        "enabled": true,
+        "chinese_font": "宋体",
+        "size_pt": 14,
+        "color_hex": "000000",
+        "allow_bold": false,
+        "allow_italic": false,
+        "allow_underline": false,
+        "allow_color_change": false,
+        "alignment": "left",
         "number_format": null
       },
       "level_4": {
@@ -174,7 +178,7 @@
   },
   "punctuation_check": {
     "enabled": true,
-    "description": "强制使用中文标点，禁止中文字符间空格。",
+    "description": "默认中文标点，中文字符间无空格",
     "require_chinese": true,
     "no_space_between_chars": true
   }

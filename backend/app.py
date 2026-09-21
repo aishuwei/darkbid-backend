@@ -2,32 +2,23 @@
 """
 backend/app.py — 追标猎手 · 暗标格式检查后端（云托管直连版）
 架构：CloudRun (Container / Python) → NoSQL HTTP API + COS Storage
-业务流程：
-  1. 上传格式要求（文本/文件）→ 创建任务
-  2. 生成规则（基于要求文本，落库为 rules_json）
-  3. 上传技术文档（.docx）→ 存云存储
-  4. 开始检查：下载文档 → FormatChecker → 批注 → 报告 → 回传云存储
-  5. 下载报告 / 批注版
 """
 import os
 import sys
 import json
 import time
 import uuid
-import random
 import tempfile
 import shutil
 import logging
 from datetime import datetime
 from flask import Flask, request, jsonify
 
-# --- 强制日志实时输出 ---
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True,
                     format='%(asctime)s [%(levelname)s] %(message)s')
 
-# --- 项目路径 ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -36,7 +27,6 @@ from backend.config import MAX_FILE_SIZE, MAX_PAGES, VALID_CODES, PERMANENT_CODE
 from backend.nosql_client import get_client, NoSQLClient
 from backend.storage_client import get_storage_client
 
-# --- 业务模块 ---
 from core.format_checker import FormatChecker
 from utils.annotator import DocumentAnnotator
 from utils.report_gen import ReportGenerator
@@ -45,8 +35,7 @@ from utils.report_gen import ReportGenerator
 # 全局配置
 # ============================================================
 ENV_ID = os.environ.get('TCB_ENV', 'darkbid-d8gxpsbued4a2867')
-INSTANCE_ID = os.environ.get('NOSQL_INSTANCE_ID', 'tnt-g536xhxde')
-logging.info(f'[boot] ENV_ID={ENV_ID}  NOSQL_INSTANCE_ID={INSTANCE_ID}')
+logging.info(f'[boot] ENV_ID={ENV_ID}')
 
 app = Flask(__name__)
 try:
@@ -114,7 +103,7 @@ def mark_code_used(code):
 
 
 # ============================================================
-# 工具函数
+# 工具
 # ============================================================
 def validate_document(file_path):
     size = os.path.getsize(file_path)
@@ -148,8 +137,7 @@ def extract_text(path):
 
 
 def _make_tmp_dir(prefix):
-    d = tempfile.mkdtemp(prefix=prefix)
-    return d
+    return tempfile.mkdtemp(prefix=prefix)
 
 
 def _cleanup_tmp(d):
@@ -160,17 +148,12 @@ def _cleanup_tmp(d):
 
 
 # ============================================================
-# 业务：规则解析（从要求文本生成规则 JSON）
+# 规则解析
 # ============================================================
 DEFAULT_RULES_PATH = os.path.join(PROJECT_ROOT, 'clients', 'config', 'rules.json')
 
 
 def build_rules_from_requirement(req_content: str):
-    """
-    基于格式要求文本生成规则。
-    若项目里已有 clients/config/rules.json，则在其基础上覆盖/补充。
-    TODO: 若后续接入 LLM 解析，把这里替换为真实解析逻辑。
-    """
     base = {}
     if os.path.exists(DEFAULT_RULES_PATH):
         try:
@@ -187,7 +170,7 @@ def build_rules_from_requirement(req_content: str):
 
 
 # ============================================================
-# API: 健康 / 数据库自检
+# API: 健康 / 自检
 # ============================================================
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -280,7 +263,8 @@ def upload_requirement_file():
 
         storage = get_storage_client()
         cloud_path = f"requirements/{uuid.uuid4().hex}/{file.filename}"
-        if not storage.upload(tmp_path, cloud_path):
+        fileid = storage.upload(tmp_path, cloud_path)
+        if not fileid:
             return jsonify({'success': False, 'message': '文件上传失败'}), 500
 
         task_id = generate_task_id()
@@ -289,7 +273,7 @@ def upload_requirement_file():
             'requirement_type': 'file',
             'requirement_text': content,
             'file_name': file.filename,
-            'file_path': cloud_path,
+            'req_file_id': fileid,
         })
         if not ok:
             return jsonify({'success': False, 'message': '任务创建失败'}), 500
@@ -352,7 +336,6 @@ def upload_document():
     tmp_path = os.path.join(tmp_dir, file.filename)
     try:
         file.save(tmp_path)
-        # 文件大小校验
         size = os.path.getsize(tmp_path)
         if size == 0:
             return jsonify({'success': False, 'message': '文件为空'}), 400
@@ -366,13 +349,14 @@ def upload_document():
 
         storage = get_storage_client()
         cloud_path = f"documents/{task_id}/{file.filename}"
-        if not storage.upload(tmp_path, cloud_path):
+        doc_file_id = storage.upload(tmp_path, cloud_path)
+        if not doc_file_id:
             return jsonify({'success': False, 'message': '文件上传失败'}), 500
 
         update_task(task_id, {
             'status': 'doc_uploaded',
             'doc_file_name': file.filename,
-            'doc_file_path': cloud_path,
+            'doc_file_id': doc_file_id,
         })
         logging.info(f'[task] 技术文档上传成功: {task_id}')
         return jsonify({'success': True, 'task_id': task_id,
@@ -383,7 +367,7 @@ def upload_document():
 
 
 # ============================================================
-# API: 开始检查（真实业务）
+# API: 开始检查
 # ============================================================
 @app.route('/api/start-check', methods=['POST'])
 def start_check():
@@ -398,19 +382,19 @@ def start_check():
         return jsonify({'success': False,
                         'message': f'任务状态异常（当前 {task.get("status")}，需 doc_uploaded）'}), 400
 
-    doc_file_path = task.get('doc_file_path')
-    if not doc_file_path:
-        return jsonify({'success': False, 'message': '技术文件路径缺失'}), 400
+    doc_file_id = task.get('doc_file_id')
+    if not doc_file_id:
+        return jsonify({'success': False, 'message': '技术文件 fileid 缺失'}), 400
 
     update_task(task_id, {'status': 'checking'})
     tmp_dir = _make_tmp_dir('chk_')
     try:
         storage = get_storage_client()
 
-        # 1. 下载待检文档
+        # 1. 下载文档
         doc_name = task.get('doc_file_name') or 'document.docx'
         doc_local = os.path.join(tmp_dir, doc_name)
-        download_url = storage.get_download_url(doc_file_path, expires=600)
+        download_url = storage.get_download_url(doc_file_id, expires=600)
         if not download_url:
             update_task(task_id, {'status': 'doc_uploaded'})
             return jsonify({'success': False, 'message': '获取文档下载链接失败'}), 500
@@ -434,7 +418,7 @@ def start_check():
                 return jsonify({'success': False, 'message': '找不到规则文件'}), 500
             rules_path = DEFAULT_RULES_PATH
 
-        # 3. 执行格式检查
+        # 3. 执行检查
         logging.info(f'[check] 开始检查: {task_id}')
         checker = FormatChecker(rules_path)
         format_issues = checker.check_document(doc_local)
@@ -458,12 +442,12 @@ def start_check():
             suffix='_检查报告',
         )
 
-        # 6. 上传结果到云存储
+        # 6. 上传结果
         report_cloud = f"reports/{task_id}/report.html"
         annotated_cloud = f"reports/{task_id}/annotated.docx"
-        ok1 = storage.upload(report_path, report_cloud)
-        ok2 = storage.upload(annotated_path, annotated_cloud)
-        if not (ok1 and ok2):
+        report_file_id = storage.upload(report_path, report_cloud)
+        annotated_file_id = storage.upload(annotated_path, annotated_cloud)
+        if not report_file_id or not annotated_file_id:
             update_task(task_id, {'status': 'failed',
                                   'error': '结果文件上传失败'})
             return jsonify({'success': False, 'message': '结果文件上传失败'}), 500
@@ -472,8 +456,8 @@ def start_check():
         update_task(task_id, {
             'status': 'completed',
             'issue_count': len(format_issues),
-            'report_path': report_cloud,
-            'annotated_path': annotated_cloud,
+            'report_file_id': report_file_id,
+            'annotated_file_id': annotated_file_id,
             'checked_at': datetime.now().isoformat(),
         })
         logging.info(f'[task] 检查完成: {task_id}, 问题数: {len(format_issues)}')
@@ -521,17 +505,17 @@ def download_result(task_id, file_type):
 
     storage = get_storage_client()
     if file_type == 'report':
-        cloud_path = task.get('report_path')
+        fileid = task.get('report_file_id')
         file_name = '格式检查报告.html'
     elif file_type == 'annotated':
-        cloud_path = task.get('annotated_path')
+        fileid = task.get('annotated_file_id')
         file_name = '批注版.docx'
     else:
         return jsonify({'success': False, 'message': f'不支持的类型: {file_type}'}), 400
 
-    if not cloud_path:
+    if not fileid:
         return jsonify({'success': False, 'message': '结果文件不存在'}), 404
-    url = storage.get_download_url(cloud_path, expires=3600)
+    url = storage.get_download_url(fileid, expires=3600)
     if not url:
         return jsonify({'success': False, 'message': '获取下载链接失败'}), 500
     return jsonify({'success': True, 'download_url': url, 'file_name': file_name})
@@ -545,6 +529,6 @@ if __name__ == '__main__':
     logging.info('=' * 50)
     logging.info('  追标猎手 - 后端服务（云托管直连版）')
     logging.info('=' * 50)
-    logging.info(f'  环境:{ENV_ID}  NoSQL实例:{INSTANCE_ID}  端口:{port}')
+    logging.info(f'  环境:{ENV_ID}  端口:{port}')
     logging.info('=' * 50)
     app.run(host='0.0.0.0', port=port, debug=False)

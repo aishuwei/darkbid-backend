@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-backend/app.py — 追标猎手 · 暗标格式检查后端（云托管直连版 · 异步检查）
+backend/app.py — 追标猎手 · 暗标格式检查后端（云托管直连版 · 配置化 + 异步检查）
 架构：CloudRun (Container / Python) → NoSQL HTTP API + COS Storage
+配置来源：
+  - 内置配置：backend/configs/*.json（打包在镜像里）
+  - 自定义配置：云数据库 configs 集合（永久码用户上传）
 """
 import os
+import re
 import sys
 import json
 import time
@@ -36,7 +40,11 @@ from utils.report_gen import ReportGenerator
 # 全局配置
 # ============================================================
 ENV_ID = os.environ.get('TCB_ENV', 'darkbid-d8gxpsbued4a2867')
+CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'configs')
+DEFAULT_RULES_PATH = os.path.join(PROJECT_ROOT, 'clients', 'config', 'rules.json')
+
 logging.info(f'[boot] ENV_ID={ENV_ID}')
+logging.info(f'[boot] CONFIGS_DIR={CONFIGS_DIR}')
 
 app = Flask(__name__)
 try:
@@ -104,6 +112,107 @@ def mark_code_used(code):
 
 
 # ============================================================
+# 配置管理
+# ============================================================
+def _load_builtin_configs():
+    """读取内置配置索引 backend/configs/index.json"""
+    index_path = os.path.join(CONFIGS_DIR, 'index.json')
+    if not os.path.exists(index_path):
+        logging.warning(f'[configs] 内置配置索引不存在: {index_path}')
+        return []
+    try:
+        with open(index_path, 'r', encoding='utf-8') as f:
+            items = json.load(f)
+        return items if isinstance(items, list) else []
+    except Exception as e:
+        logging.error(f'[configs] 读取内置索引失败: {e}')
+        return []
+
+
+def _get_builtin_config(config_id):
+    """读取内置配置全文"""
+    path = os.path.join(CONFIGS_DIR, f'{config_id}.json')
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error(f'[configs] 读取内置配置 {config_id} 失败: {e}')
+        return None
+
+
+def _list_db_configs():
+    """从数据库读取自定义配置"""
+    try:
+        docs = db_query('configs', limit=100) or []
+        return docs
+    except Exception as e:
+        logging.error(f'[configs] 读取数据库配置失败: {e}')
+        return []
+
+
+def _get_db_config(config_id):
+    """从数据库读取指定配置"""
+    try:
+        return db_query_one('configs', 'config_id', config_id)
+    except Exception as e:
+        logging.error(f'[configs] 查询数据库配置 {config_id} 失败: {e}')
+        return None
+
+
+def get_config_by_id(config_id):
+    """优先查内置，再查数据库。返回 {'config_name': ..., 'rules': {...}} 或 None"""
+    # 1. 内置
+    cfg = _get_builtin_config(config_id)
+    if cfg:
+        rules = cfg.get('rules') or cfg  # 兼容：要么有 rules 字段，要么整个就是 rules
+        return {
+            'config_id': config_id,
+            'config_name': cfg.get('config_name') or config_id,
+            'rules': rules,
+        }
+    # 2. 数据库
+    cfg = _get_db_config(config_id)
+    if cfg:
+        rules = cfg.get('rules') or cfg
+        return {
+            'config_id': config_id,
+            'config_name': cfg.get('config_name') or config_id,
+            'rules': rules,
+        }
+    return None
+
+
+def list_all_configs():
+    """合并内置 + 数据库配置列表，去重"""
+    merged = []
+    seen = set()
+
+    for c in _load_builtin_configs():
+        cid = c.get('config_id')
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        merged.append({
+            'config_id': cid,
+            'config_name': c.get('config_name') or cid,
+        })
+
+    for c in _list_db_configs():
+        cid = c.get('config_id')
+        if not cid or cid in seen:
+            continue
+        seen.add(cid)
+        merged.append({
+            'config_id': cid,
+            'config_name': c.get('config_name') or cid,
+        })
+
+    return merged
+
+
+# ============================================================
 # 工具
 # ============================================================
 def validate_document(file_path):
@@ -122,21 +231,6 @@ def validate_document(file_path):
     return True, "校验通过"
 
 
-def extract_text(path):
-    ext = os.path.splitext(path)[1].lower()
-    if ext == '.docx':
-        from docx import Document
-        return '\n'.join(p.text for p in Document(path).paragraphs)
-    for enc in ('utf-8', 'gbk'):
-        try:
-            with open(path, 'r', encoding=enc) as f:
-                return f.read()
-        except UnicodeDecodeError:
-            continue
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-        return f.read()
-
-
 def _make_tmp_dir(prefix):
     return tempfile.mkdtemp(prefix=prefix)
 
@@ -146,28 +240,6 @@ def _cleanup_tmp(d):
         shutil.rmtree(d, ignore_errors=True)
     except Exception:
         pass
-
-
-# ============================================================
-# 规则解析
-# ============================================================
-DEFAULT_RULES_PATH = os.path.join(PROJECT_ROOT, 'clients', 'config', 'rules.json')
-
-
-def build_rules_from_requirement(req_content: str):
-    base = {}
-    if os.path.exists(DEFAULT_RULES_PATH):
-        try:
-            with open(DEFAULT_RULES_PATH, 'r', encoding='utf-8') as f:
-                base = json.load(f)
-        except Exception as e:
-            logging.warning(f'[rules] 读取默认规则失败: {e}')
-
-    base.setdefault('document_info', {})
-    base['document_info']['name'] = '格式检查规则'
-    base['document_info']['generated_date'] = datetime.now().strftime('%Y-%m-%d')
-    base['source_text_length'] = len(req_content or '')
-    return base
 
 
 # ============================================================
@@ -213,126 +285,55 @@ def verify_code():
 
 
 # ============================================================
-# API: 上传格式要求（文本）
+# API: 配置列表
 # ============================================================
-@app.route('/api/upload-req-text', methods=['POST'])
-def upload_requirement_text():
-    data = request.get_json(silent=True) or {}
-    text = (data.get('text') or '').strip()
-    if not text:
-        return jsonify({'success': False, 'message': '文本不能为空'}), 400
-    if len(text) > 5000:
-        return jsonify({'success': False, 'message': '文本超过5000字限制'}), 400
-    task_id = generate_task_id()
-    ok = create_task(task_id, {
-        'status': 'req_uploaded',
-        'requirement_type': 'text',
-        'requirement_text': text,
-    })
-    if not ok:
-        return jsonify({'success': False, 'message': '任务创建失败'}), 500
-    logging.info(f'[task] 文本任务创建成功: {task_id}')
-    return jsonify({'success': True, 'task_id': task_id,
-                    'message': '格式要求已接收'})
-
-
-# ============================================================
-# API: 上传格式要求（文件）
-# ============================================================
-@app.route('/api/upload-req-file', methods=['POST'])
-def upload_requirement_file():
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'message': '未选择文件'}), 400
-    file = request.files['file']
-    if not file.filename:
-        return jsonify({'success': False, 'message': '文件名为空'}), 400
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in ('.docx', '.txt'):
-        return jsonify({'success': False, 'message': '仅支持 .docx 和 .txt'}), 400
-
-    tmp_dir = _make_tmp_dir('req_')
-    tmp_path = os.path.join(tmp_dir, file.filename)
+@app.route('/api/configs/list', methods=['GET'])
+def api_configs_list():
     try:
-        file.save(tmp_path)
-        if ext == '.docx':
-            valid, msg = validate_document(tmp_path)
-            if not valid:
-                return jsonify({'success': False, 'message': msg}), 400
-        content = extract_text(tmp_path)
-        if len(content) > 5000:
-            return jsonify({'success': False, 'message': '要求文本超过5000字限制'}), 400
-
-        storage = get_storage_client()
-        cloud_path = f"requirements/{uuid.uuid4().hex}/{file.filename}"
-        fileid = storage.upload(tmp_path, cloud_path)
-        if not fileid:
-            return jsonify({'success': False, 'message': '文件上传失败'}), 500
-
-        task_id = generate_task_id()
-        ok = create_task(task_id, {
-            'status': 'req_uploaded',
-            'requirement_type': 'file',
-            'requirement_text': content,
-            'file_name': file.filename,
-            'req_file_id': fileid,
-        })
-        if not ok:
-            return jsonify({'success': False, 'message': '任务创建失败'}), 500
-        logging.info(f'[task] 文件任务创建成功: {task_id}')
-        return jsonify({'success': True, 'task_id': task_id,
-                        'message': '格式要求文件已上传',
-                        'file_name': file.filename})
-    finally:
-        _cleanup_tmp(tmp_dir)
+        configs = list_all_configs()
+        return jsonify({'success': True, 'configs': configs})
+    except Exception as e:
+        logging.exception('[configs/list] 失败')
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 # ============================================================
-# API: 生成规则
+# API: 一次性检查（file + config_id 或 rules_json）
 # ============================================================
-@app.route('/api/generate-rules', methods=['POST'])
-def generate_rules():
-    data = request.get_json(silent=True) or {}
-    task_id = data.get('taskId') or data.get('task_id')
-    if not task_id:
-        return jsonify({'success': False, 'message': '缺少任务ID'}), 400
-    task = get_task(task_id)
-    if not task:
-        return jsonify({'success': False, 'message': '任务不存在'}), 404
-    if task.get('status') not in ('req_uploaded', 'rules_generated'):
-        return jsonify({'success': False, 'message': '任务状态异常'}), 400
-
-    req_content = task.get('requirement_text') or ''
-    rules = build_rules_from_requirement(req_content)
-    rules_json = json.dumps(rules, ensure_ascii=False, indent=2)
-
-    if not update_task(task_id, {'status': 'rules_generated',
-                                 'rules_json': rules_json}):
-        return jsonify({'success': False, 'message': '规则保存失败'}), 500
-    logging.info(f'[task] 规则生成成功: {task_id}')
-    return jsonify({'success': True, 'message': '配置已生成',
-                    'task_id': task_id})
-
-
-# ============================================================
-# API: 上传技术文档
-# ============================================================
-@app.route('/api/upload-doc', methods=['POST'])
-def upload_document():
+@app.route('/api/check', methods=['POST'])
+def api_check():
     if 'file' not in request.files:
         return jsonify({'success': False, 'message': '未选择文件'}), 400
     file = request.files['file']
-    if not file.filename:
-        return jsonify({'success': False, 'message': '文件名为空'}), 400
-    if os.path.splitext(file.filename)[1].lower() != '.docx':
+    if not file.filename or not file.filename.lower().endswith('.docx'):
         return jsonify({'success': False, 'message': '仅支持 .docx 格式'}), 400
 
-    task_id = request.form.get('task_id') or request.form.get('taskId')
-    if not task_id:
-        return jsonify({'success': False, 'message': '缺少任务ID'}), 400
-    task = get_task(task_id)
-    if not task:
-        return jsonify({'success': False, 'message': '任务不存在'}), 404
+    config_id = (request.form.get('config_id') or '').strip()
+    rules_json_str = (request.form.get('rules_json') or '').strip()
 
+    # 解析规则
+    rules = None
+    config_name = '自定义标准'
+
+    if config_id:
+        cfg = get_config_by_id(config_id)
+        if not cfg:
+            return jsonify({'success': False, 'message': f'配置 {config_id} 不存在'}), 404
+        rules = cfg['rules']
+        config_name = cfg['config_name']
+    elif rules_json_str:
+        try:
+            rules = json.loads(rules_json_str)
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'rules_json 解析失败: {e}'}), 400
+        if not isinstance(rules, dict):
+            return jsonify({'success': False, 'message': 'rules_json 必须是 JSON 对象'}), 400
+        config_name = '自定义标准'
+    else:
+        return jsonify({'success': False, 'message': '必须提供 config_id 或 rules_json'}), 400
+
+    # 校验文档
+    task_id = generate_task_id()
     tmp_dir = _make_tmp_dir('doc_')
     tmp_path = os.path.join(tmp_dir, file.filename)
     try:
@@ -342,36 +343,98 @@ def upload_document():
             return jsonify({'success': False, 'message': '文件为空'}), 400
         if size > MAX_FILE_SIZE:
             return jsonify({'success': False,
-                            'message': f'文件大小{size / 1024 / 1024:.2f}MB，'
-                                       f'超过限制{MAX_FILE_SIZE / 1024 / 1024:.0f}MB'}), 400
+                            'message': f'文件超过 {MAX_FILE_SIZE / 1024 / 1024:.0f}MB 限制'}), 400
         valid, msg = validate_document(tmp_path)
         if not valid:
             return jsonify({'success': False, 'message': msg}), 400
 
+        # 上传云存储
         storage = get_storage_client()
         cloud_path = f"documents/{task_id}/{file.filename}"
         doc_file_id = storage.upload(tmp_path, cloud_path)
         if not doc_file_id:
             return jsonify({'success': False, 'message': '文件上传失败'}), 500
 
-        update_task(task_id, {
-            'status': 'doc_uploaded',
+        # 创建任务
+        rules_json = json.dumps(rules, ensure_ascii=False)
+        ok = create_task(task_id, {
+            'status': 'checking',
+            'config_id': config_id or '',
+            'config_name': config_name,
             'doc_file_name': file.filename,
             'doc_file_id': doc_file_id,
+            'rules_json': rules_json,
         })
-        logging.info(f'[task] 技术文档上传成功: {task_id}')
-        return jsonify({'success': True, 'task_id': task_id,
-                        'message': '投标文档已上传',
-                        'file_name': file.filename})
+        if not ok:
+            return jsonify({'success': False, 'message': '任务创建失败'}), 500
+
+        # 启动后台检查
+        t = threading.Thread(target=_run_check_async, args=(task_id,), daemon=True)
+        t.start()
+        logging.info(f'[task] 检查已启动: {task_id}, 配置: {config_name}')
+        return jsonify({'success': True, 'task_id': task_id, 'status': 'checking'})
     finally:
         _cleanup_tmp(tmp_dir)
+
+
+# ============================================================
+# API: 上传配置（永久码鉴权）
+# ============================================================
+@app.route('/api/admin/upload-config', methods=['POST'])
+def api_admin_upload_config():
+    data = request.get_json(silent=True) or {}
+
+    perm_code = (data.get('perm_code') or '').strip().upper()
+    if perm_code not in PERMANENT_CODES:
+        logging.warning(f'[admin] 无效永久码尝试: {perm_code}')
+        return jsonify({'success': False, 'message': '无效的管理员码'}), 403
+
+    config_id = (data.get('config_id') or '').strip()
+    config_name = (data.get('config_name') or '').strip()
+    rules = data.get('rules')
+
+    if not config_id or not config_name:
+        return jsonify({'success': False, 'message': '缺少 config_id 或 config_name'}), 400
+    if not isinstance(rules, dict):
+        return jsonify({'success': False, 'message': 'rules 必须是 JSON 对象'}), 400
+    if not re.match(r'^[a-zA-Z0-9_]{1,40}$', config_id):
+        return jsonify({'success': False,
+                        'message': 'config_id 只允许字母、数字、下划线，长度 1-40'}), 400
+
+    # 不允许覆盖内置配置
+    if _get_builtin_config(config_id):
+        return jsonify({'success': False, 'message': f'config_id「{config_id}」已被内置配置占用'}), 409
+
+    try:
+        existing = _get_db_config(config_id)
+        if existing:
+            db_update_where('configs', 'config_id', config_id, {
+                'config_name': config_name,
+                'rules': rules,
+                'updated_at': datetime.now().isoformat(),
+            })
+            logging.info(f'[admin] 更新配置: {config_id} - {config_name}')
+        else:
+            db_add('configs', {
+                'config_id': config_id,
+                'config_name': config_name,
+                'rules': rules,
+                'source': 'admin',
+                'created_at': datetime.now().isoformat(),
+            })
+            logging.info(f'[admin] 新增配置: {config_id} - {config_name}')
+    except Exception as e:
+        logging.exception('[admin] 保存配置失败')
+        return jsonify({'success': False, 'message': f'保存失败: {e}'}), 500
+
+    return jsonify({'success': True, 'config_id': config_id,
+                    'message': f'配置「{config_name}」已保存'})
 
 
 # ============================================================
 # 后台线程：执行真正的检查逻辑
 # ============================================================
 def _run_check_async(task_id):
-    """后台线程执行检查、批注、报告生成，结果写回数据库"""
     task = get_task(task_id)
     if not task:
         logging.error(f'[check-async] 任务不存在: {task_id}')
@@ -463,42 +526,6 @@ def _run_check_async(task_id):
 
 
 # ============================================================
-# API: 开始检查（立即返回，后台执行）
-# ============================================================
-@app.route('/api/start-check', methods=['POST'])
-def start_check():
-    data = request.get_json(silent=True) or {}
-    task_id = data.get('taskId') or data.get('task_id')
-    if not task_id:
-        return jsonify({'success': False, 'message': '缺少任务ID'}), 400
-    task = get_task(task_id)
-    if not task:
-        return jsonify({'success': False, 'message': '任务不存在'}), 404
-    if task.get('status') != 'doc_uploaded':
-        return jsonify({'success': False,
-                        'message': f'任务状态异常（当前 {task.get("status")}，需 doc_uploaded）'}), 400
-
-    doc_file_id = task.get('doc_file_id')
-    if not doc_file_id:
-        return jsonify({'success': False, 'message': '技术文件 fileid 缺失'}), 400
-
-    # 立即更新状态为 checking
-    update_task(task_id, {'status': 'checking'})
-
-    # 启动后台线程
-    t = threading.Thread(target=_run_check_async, args=(task_id,), daemon=True)
-    t.start()
-
-    logging.info(f'[task] 检查任务已启动: {task_id}')
-    return jsonify({
-        'success': True,
-        'task_id': task_id,
-        'status': 'checking',
-        'message': '检查已开始，请轮询状态'
-    })
-
-
-# ============================================================
 # API: 任务状态
 # ============================================================
 @app.route('/api/status/<task_id>', methods=['GET'])
@@ -553,7 +580,7 @@ def download_result(task_id, file_type):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 80))
     logging.info('=' * 50)
-    logging.info('  追标猎手 - 后端服务（异步检查版）')
+    logging.info('  追标猎手 - 后端服务（配置化 + 异步检查版）')
     logging.info('=' * 50)
     logging.info(f'  环境:{ENV_ID}  端口:{port}')
     logging.info('=' * 50)

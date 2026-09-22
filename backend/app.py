@@ -3,7 +3,7 @@
 backend/app.py — 追标猎手 · 暗标格式检查后端（云托管直连版 · 配置化 + 异步检查）
 架构：CloudRun (Container / Python) → NoSQL HTTP API + COS Storage
 配置来源：
-  - 内置配置：backend/configs/*.json（打包在镜像里）
+  - 内置配置：clients/config/*.json（打包在镜像里）+ clients/config/index.json（索引）
   - 自定义配置：云数据库 configs 集合（永久码用户上传）
 """
 import os
@@ -40,8 +40,9 @@ from utils.report_gen import ReportGenerator
 # 全局配置
 # ============================================================
 ENV_ID = os.environ.get('TCB_ENV', 'darkbid-d8gxpsbued4a2867')
-CONFIGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'configs')
-DEFAULT_RULES_PATH = os.path.join(PROJECT_ROOT, 'clients', 'config', 'rules.json')
+# ⚠️ 配置目录指向 clients/config（你实际存放 guizhou.json 和 index.json 的地方）
+CONFIGS_DIR = os.path.join(PROJECT_ROOT, 'clients', 'config')
+DEFAULT_RULES_PATH = os.path.join(CONFIGS_DIR, 'rules.json')
 
 logging.info(f'[boot] ENV_ID={ENV_ID}')
 logging.info(f'[boot] CONFIGS_DIR={CONFIGS_DIR}')
@@ -114,8 +115,23 @@ def mark_code_used(code):
 # ============================================================
 # 配置管理
 # ============================================================
+# 配置里可能出现的元信息字段（不属于规则本身，不传给 format_checker）
+META_KEYS = {'config_id', 'config_name', 'version', 'source', 'updated_at'}
+
+
+def _extract_rules(cfg):
+    """从配置 dict 里剥出纯规则，兼容两种格式：
+       A) 有 rules 外壳：{config_id, config_name, rules: {...}} → 返回 cfg['rules']
+       B) 平铺格式：{config_id, config_name, document_info: {...}, ...} → 剥元字段后返回
+       C) 纯规则：{document_info: {...}, page_check: {...}} → 直接返回
+    """
+    if isinstance(cfg.get('rules'), dict):
+        return cfg['rules']
+    return {k: v for k, v in cfg.items() if k not in META_KEYS}
+
+
 def _load_builtin_configs():
-    """读取内置配置索引 backend/configs/index.json"""
+    """读取内置配置索引 clients/config/index.json"""
     index_path = os.path.join(CONFIGS_DIR, 'index.json')
     if not os.path.exists(index_path):
         logging.warning(f'[configs] 内置配置索引不存在: {index_path}')
@@ -127,6 +143,14 @@ def _load_builtin_configs():
     except Exception as e:
         logging.error(f'[configs] 读取内置索引失败: {e}')
         return []
+
+
+def _find_builtin_name(config_id):
+    """从 index.json 里查显示名"""
+    for item in _load_builtin_configs():
+        if item.get('config_id') == config_id:
+            return item.get('config_name')
+    return None
 
 
 def _get_builtin_config(config_id):
@@ -163,24 +187,26 @@ def _get_db_config(config_id):
 
 def get_config_by_id(config_id):
     """优先查内置，再查数据库。返回 {'config_name': ..., 'rules': {...}} 或 None"""
-    # 1. 内置
+    # 1. 内置配置
     cfg = _get_builtin_config(config_id)
     if cfg:
-        rules = cfg.get('rules') or cfg  # 兼容：要么有 rules 字段，要么整个就是 rules
+        # 显示名：优先配置文件里的 config_name，没有就从 index.json 查
+        name = cfg.get('config_name') or _find_builtin_name(config_id) or config_id
         return {
             'config_id': config_id,
-            'config_name': cfg.get('config_name') or config_id,
-            'rules': rules,
+            'config_name': name,
+            'rules': _extract_rules(cfg),
         }
-    # 2. 数据库
+
+    # 2. 数据库配置
     cfg = _get_db_config(config_id)
     if cfg:
-        rules = cfg.get('rules') or cfg
         return {
             'config_id': config_id,
             'config_name': cfg.get('config_name') or config_id,
-            'rules': rules,
+            'rules': _extract_rules(cfg),
         }
+
     return None
 
 
@@ -189,6 +215,7 @@ def list_all_configs():
     merged = []
     seen = set()
 
+    # 内置配置列表
     for c in _load_builtin_configs():
         cid = c.get('config_id')
         if not cid or cid in seen:
@@ -199,6 +226,7 @@ def list_all_configs():
             'config_name': c.get('config_name') or cid,
         })
 
+    # 数据库配置列表
     for c in _list_db_configs():
         cid = c.get('config_id')
         if not cid or cid in seen:
@@ -403,7 +431,8 @@ def api_admin_upload_config():
 
     # 不允许覆盖内置配置
     if _get_builtin_config(config_id):
-        return jsonify({'success': False, 'message': f'config_id「{config_id}」已被内置配置占用'}), 409
+        return jsonify({'success': False,
+                        'message': f'config_id「{config_id}」已被内置配置占用'}), 409
 
     try:
         existing = _get_db_config(config_id)
